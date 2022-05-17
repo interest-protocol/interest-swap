@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.13;
 
-import "../interfaces/IERC20.sol";
-import "../interfaces/IFactory.sol";
-import "../interfaces/IPairCallee.sol";
-import "../lib/Math.sol";
+import "./interfaces/IERC20.sol";
+import "./interfaces/IFactory.sol";
+import "./interfaces/IPairCallee.sol";
+
+import "./lib/Math.sol";
 
 import "./Fees.sol";
 
@@ -53,7 +54,9 @@ contract Pair is IERC20 {
     //solhint-disable-next-line var-name-mixedcase
     bytes32 private DOMAIN_SEPARATOR;
     bytes32 private constant PERMIT_TYPEHASH =
-        0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9;
+        keccak256(
+            "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+        );
     mapping(address => uint256) public nonces;
 
     uint256 private constant MINIMUM_LIQUIDITY = 1000;
@@ -108,7 +111,7 @@ contract Pair is IERC20 {
             );
             symbol = string(
                 abi.encodePacked(
-                    "sLP-",
+                    "sILP-",
                     IERC20(_token0).symbol(),
                     "/",
                     IERC20(_token1).symbol()
@@ -125,7 +128,7 @@ contract Pair is IERC20 {
             );
             symbol = string(
                 abi.encodePacked(
-                    "vLP-",
+                    "vILP-",
                     IERC20(_token0).symbol(),
                     "/",
                     IERC20(_token1).symbol()
@@ -320,6 +323,7 @@ contract Pair is IERC20 {
 
         uint256 _reserve0 = (reserve0Cumulative -
             firstObservation.reserve0Cumulative) / timeElapsed;
+
         uint256 _reserve1 = (reserve1Cumulative -
             firstObservation.reserve1Cumulative) / timeElapsed;
 
@@ -489,6 +493,53 @@ contract Pair is IERC20 {
         (uint256 _reserve0, uint256 _reserve1) = (reserve0, reserve1);
         amountIn -= (amountIn * swapFee) / 1e18; // remove fee from amount received
         return _computeAmountOut(amountIn, tokenIn, _reserve0, _reserve1);
+    }
+
+    function permit(
+        address owner,
+        address spender,
+        uint256 value,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        require(deadline >= block.timestamp, "Pair: Expired");
+        DOMAIN_SEPARATOR = keccak256(
+            abi.encode(
+                keccak256(
+                    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+                ),
+                keccak256(bytes(name)),
+                keccak256("v1"),
+                block.chainid,
+                address(this)
+            )
+        );
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                DOMAIN_SEPARATOR,
+                keccak256(
+                    abi.encode(
+                        PERMIT_TYPEHASH,
+                        owner,
+                        spender,
+                        value,
+                        nonces[owner]++,
+                        deadline
+                    )
+                )
+            )
+        );
+        address recoveredAddress = ecrecover(digest, v, r, s);
+        require(
+            recoveredAddress != address(0) && recoveredAddress == owner,
+            "Pair: invalid signature"
+        );
+        allowance[owner][spender] = value;
+
+        emit Approval(owner, spender, value);
     }
 
     function _f(uint256 x0, uint256 y) internal pure returns (uint256) {

@@ -6,7 +6,7 @@ import "./interfaces/IERC20.sol";
 contract Fees {
     address private immutable pair;
     address private immutable token0;
-    address internal immutable token1;
+    address private immutable token1;
 
     constructor(address _token0, address _token1) {
         pair = msg.sender;
@@ -37,6 +37,6 @@ contract Fees {
     ) external {
         require(msg.sender == pair, "PairHelper: only the pair");
         if (amount0 > 0) _safeTransfer(token0, recipient, amount0);
-        if (amount1 > 0) _safeTransfer(token0, recipient, amount1);
+        if (amount1 > 0) _safeTransfer(token1, recipient, amount1);
     }
 }

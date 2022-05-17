@@ -74,8 +74,8 @@ contract Pair is IERC20 {
 
     Observation[] public observations;
 
-    uint256 internal immutable decimals0;
-    uint256 internal immutable decimals1;
+    uint256 private immutable decimals0;
+    uint256 private immutable decimals1;
 
     uint256 public reserve0;
     uint256 public reserve1;
@@ -542,7 +542,7 @@ contract Pair is IERC20 {
         emit Approval(owner, spender, value);
     }
 
-    function _f(uint256 x0, uint256 y) internal pure returns (uint256) {
+    function _f(uint256 x0, uint256 y) private pure returns (uint256) {
         return
             (x0 * ((((y * y) / 1e18) * y) / 1e18)) /
             1e18 +
@@ -550,7 +550,7 @@ contract Pair is IERC20 {
             1e18;
     }
 
-    function _d(uint256 x0, uint256 y) internal pure returns (uint256) {
+    function _d(uint256 x0, uint256 y) private pure returns (uint256) {
         return
             (3 * x0 * ((y * y) / 1e18)) /
             1e18 +
@@ -561,7 +561,7 @@ contract Pair is IERC20 {
         uint256 x0,
         uint256 xy,
         uint256 y
-    ) internal pure returns (uint256) {
+    ) private pure returns (uint256) {
         for (uint256 i = 0; i < 255; i++) {
             uint256 prevY = y;
             uint256 k = _f(x0, y);
@@ -604,7 +604,7 @@ contract Pair is IERC20 {
         emit Transfer(address(0), recipient, amount);
     }
 
-    function _burn(address recipient, uint256 amount) internal {
+    function _burn(address recipient, uint256 amount) private {
         _updateFeesFor(recipient); // balances must be updated on mint/burn/transfer
         totalSupply -= amount;
         balanceOf[recipient] -= amount;
@@ -739,7 +739,7 @@ contract Pair is IERC20 {
         address from,
         address to,
         uint256 amount
-    ) internal {
+    ) private {
         _updateFeesFor(from); // update fee position for src
         _updateFeesFor(to); // update fee position for dst
 

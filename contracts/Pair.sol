@@ -291,8 +291,10 @@ contract Pair is IERC20 {
         if (_blockTimestampLast != blockTimestamp) {
             // subtraction overflow is desired
             uint256 timeElapsed = blockTimestamp - _blockTimestampLast;
-            reserve0Cumulative += _reserve0 * timeElapsed;
-            reserve1Cumulative += _reserve1 * timeElapsed;
+            unchecked {
+                reserve0Cumulative += _reserve0 * timeElapsed;
+                reserve1Cumulative += _reserve1 * timeElapsed;
+            }
         }
     }
 
@@ -647,8 +649,10 @@ contract Pair is IERC20 {
         uint256 timeElapsed = currentTimeStamp - blockTimestampLast;
 
         if (timeElapsed > 0 && _reserve0 != 0 && _reserve1 != 0) {
-            reserve0CumulativeLast += _reserve0 * timeElapsed;
-            reserve1CumulativeLast += _reserve1 * timeElapsed;
+            unchecked {
+                reserve0CumulativeLast += _reserve0 * timeElapsed;
+                reserve1CumulativeLast += _reserve1 * timeElapsed;
+            }
         }
 
         //solhint-disable-next-line not-rely-on-time

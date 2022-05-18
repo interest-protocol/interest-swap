@@ -36,16 +36,26 @@ describe("Fees Contract", () => {
   });
 
   describe("function: claimFor", () => {
+    it("reverts if the token is a EOA", async () => {
+      const fees = (await deploy("Fees", [
+        alice.address,
+        token1.address,
+      ])) as Fees;
+
+      await expect(fees.claimFor(owner.address, 1, 0)).to.revertedWith(
+        "Address: not a contract"
+      );
+    });
     it("reverts if it is not called by the owner", async () => {
       await expect(
         fees.connect(alice).claimFor(alice.address, 1, 1)
-      ).to.revertedWith("PairHelper: only the pair");
+      ).to.revertedWith("Fees: only the pair");
     });
 
     it("reverts if you try to send more than the contract balance", async () => {
       await expect(
         fees.connect(owner).claimFor(alice.address, parseEther("150"), 1)
-      ).to.revertedWith("PairHelper: failed to transfer");
+      ).to.revertedWith("Address: failed to transfer");
     });
 
     it("sends tokens to the recipient", async () => {

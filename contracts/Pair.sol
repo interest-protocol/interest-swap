@@ -218,6 +218,7 @@ contract Pair is IERC20 {
             address t0,
             address t1,
             bool st,
+            uint256 fee,
             uint256 r0,
             uint256 r1,
             uint256 dec0,
@@ -228,6 +229,7 @@ contract Pair is IERC20 {
             token0,
             token1,
             stable,
+            swapFee,
             reserve0,
             reserve1,
             decimals0,
@@ -807,7 +809,7 @@ contract Pair is IERC20 {
      * @param amount The number of tokens to burn.
      */
     function _burn(address recipient, uint256 amount) private {
-        // First update the current rewards
+        // First update the current rewards. Sanity check
         _updateFeesFor(recipient);
         totalSupply -= amount;
         balanceOf[recipient] -= amount;

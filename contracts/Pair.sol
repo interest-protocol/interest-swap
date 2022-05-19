@@ -132,42 +132,42 @@ contract Pair is IERC20 {
             name = string(
                 abi.encodePacked(
                     "Int Stable LP - ",
-                    IERC20(_token0).symbol(),
+                    _token0.safeSymbol(),
                     "/",
-                    IERC20(_token1).symbol()
+                    _token1.safeSymbol()
                 )
             );
             symbol = string(
                 abi.encodePacked(
                     "sILP-",
-                    IERC20(_token0).symbol(),
+                    _token0.safeSymbol(),
                     "/",
-                    IERC20(_token1).symbol()
+                    _token1.safeSymbol()
                 )
             );
         } else {
             name = string(
                 abi.encodePacked(
                     "Int Volatile LP - ",
-                    IERC20(_token0).symbol(),
+                    _token0.safeSymbol(),
                     "/",
-                    IERC20(_token1).symbol()
+                    _token1.safeSymbol()
                 )
             );
             symbol = string(
                 abi.encodePacked(
                     "vILP-",
-                    IERC20(_token0).symbol(),
+                    _token0.safeSymbol(),
                     "/",
-                    IERC20(_token1).symbol()
+                    _token1.safeSymbol()
                 )
             );
         }
 
-        decimals0 = 10**IERC20(_token0).decimals();
-        decimals1 = 10**IERC20(_token1).decimals();
+        decimals0 = 10**_token0.safeDecimals();
+        decimals1 = 10**_token1.safeDecimals();
 
-        // populate the array with empty observations (first call only)
+        // populate the array with empty observations
         for (uint256 i = observations.length; i < GRANULARITY; i++) {
             observations.push();
         }

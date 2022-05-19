@@ -32,4 +32,14 @@ library Address {
             "Address: failed to transfer"
         );
     }
+
+    /**
+     * @dev Returns the current balance of an ERC20 held by this contract.
+     *
+     * @param token The address of the ERC20 we will check the balance
+     * @return uint256 The current balance of the contract
+     */
+    function currentBalance(address token) internal view returns (uint256) {
+        return IERC20(token).balanceOf(address(this));
+    }
 }

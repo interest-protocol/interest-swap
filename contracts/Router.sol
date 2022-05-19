@@ -105,12 +105,12 @@ contract Router {
         uint256 amountStable;
         uint256 amountVolatile;
         if (IFactory(factory).isPair(pair)) {
-            amountStable = IPair(pair).getAmountOut(amountIn, tokenIn);
+            amountStable = IPair(pair).getAmountOut(tokenIn, amountIn);
         }
 
         pair = pairFor(tokenIn, tokenOut, false);
         if (IFactory(factory).isPair(pair)) {
-            amountVolatile = IPair(pair).getAmountOut(amountIn, tokenIn);
+            amountVolatile = IPair(pair).getAmountOut(tokenIn, amountIn);
         }
         return
             amountStable > amountVolatile
@@ -135,8 +135,8 @@ contract Router {
             );
             if (IFactory(factory).isPair(pair)) {
                 amounts[i + 1] = IPair(pair).getAmountOut(
-                    amounts[i],
-                    routes[i].from
+                    routes[i].from,
+                    amounts[i]
                 );
             }
         }

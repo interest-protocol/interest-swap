@@ -40,5 +40,5 @@ interface IPair {
             uint32 _blockTimestampLast
         );
 
-    function getAmountOut(uint256, address) external view returns (uint256);
+    function getAmountOut(address, uint256) external view returns (uint256);
 }

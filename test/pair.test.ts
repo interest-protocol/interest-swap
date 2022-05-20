@@ -1,12 +1,27 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
 
-import { Pair, ERC20, Factory, ERC20Small } from "../typechain";
+import { Pair, ERC20, Factory, ERC20Small, ERC20RMint } from "../typechain";
 
-import { multiDeploy, sortTokens } from "./utils";
+import {
+  multiDeploy,
+  sortTokens,
+  getECSign,
+  getPairDigest,
+  getPairDomainSeparator,
+  PRIVATE_KEYS,
+  advanceBlockAndTime,
+  deploy,
+  sqrt,
+  min,
+} from "./utils";
 
 const { parseEther } = ethers.utils;
+
+const PERIOD_SIZE = 86400 / 12;
+
+const MINIMUM_LIQUIDITY = ethers.BigNumber.from(1000);
 
 describe("Pair", () => {
   let volatilePair: Pair;
@@ -278,6 +293,371 @@ describe("Pair", () => {
 
       expect(ownerBalance4).to.be.equal(parseEther("10").add(ownerBalance3));
       expect(aliceBalance4).to.be.equal(aliceBalance3.sub(parseEther("10")));
+    });
+
+    it("reverts if the permit has expired", async () => {
+      const blockTimestamp = await (
+        await ethers.provider.getBlock(await ethers.provider.getBlockNumber())
+      ).timestamp;
+
+      await expect(
+        volatilePair.permit(
+          alice.address,
+          bob.address,
+          0,
+          blockTimestamp - 1,
+          0,
+          ethers.constants.HashZero,
+          ethers.constants.HashZero
+        )
+      ).to.revertedWith("Pair: Expired");
+    });
+
+    it("reverts if the recovered address is wrong", async () => {
+      const chainId = network.config.chainId || 0;
+      const name = await volatilePair.name();
+      const domainSeparator = getPairDomainSeparator(
+        volatilePair.address,
+        name,
+        chainId
+      );
+
+      const digest = getPairDigest(
+        domainSeparator,
+        alice.address,
+        bob.address,
+        parseEther("100"),
+        0,
+        1700587613
+      );
+
+      const { v, r, s } = getECSign(PRIVATE_KEYS[1], digest);
+
+      const bobAllowance = await volatilePair.allowance(
+        alice.address,
+        bob.address
+      );
+
+      expect(bobAllowance).to.be.equal(0);
+
+      await Promise.all([
+        expect(
+          volatilePair
+            .connect(bob)
+            .permit(
+              owner.address,
+              bob.address,
+              parseEther("100"),
+              1700587613,
+              v,
+              r,
+              s
+            )
+        ).to.revertedWith("Pair: invalid signature"),
+        expect(
+          volatilePair
+            .connect(bob)
+            .permit(
+              owner.address,
+              bob.address,
+              parseEther("100"),
+              1700587613,
+              0,
+              ethers.constants.HashZero,
+              ethers.constants.HashZero
+            )
+        ).to.revertedWith("Pair: invalid signature"),
+      ]);
+    });
+
+    it("allows for permit call to give allowance", async () => {
+      const chainId = network.config.chainId || 0;
+      const name = await volatilePair.name();
+      const domainSeparator = getPairDomainSeparator(
+        volatilePair.address,
+        name,
+        chainId
+      );
+
+      const digest = getPairDigest(
+        domainSeparator,
+        alice.address,
+        bob.address,
+        parseEther("100"),
+        0,
+        1700587613
+      );
+
+      const { v, r, s } = getECSign(PRIVATE_KEYS[1], digest);
+
+      const bobAllowance = await volatilePair.allowance(
+        alice.address,
+        bob.address
+      );
+      expect(bobAllowance).to.be.equal(0);
+
+      await expect(
+        volatilePair
+          .connect(bob)
+          .permit(
+            alice.address,
+            bob.address,
+            parseEther("100"),
+            1700587613,
+            v,
+            r,
+            s
+          )
+      )
+        .to.emit(volatilePair, "Approval")
+        .withArgs(alice.address, bob.address, parseEther("100"));
+
+      const bobAllowance2 = await volatilePair.allowance(
+        alice.address,
+        bob.address
+      );
+      expect(bobAllowance2).to.be.equal(parseEther("100"));
+    });
+  });
+
+  it("returns the tokens sorted", async () => {
+    const [token0Address] = sortTokens(tokenA.address, tokenB.address);
+
+    const token0 = token0Address === tokenA.address ? tokenA : tokenB;
+    const token1 = token0Address === tokenA.address ? tokenB : tokenA;
+
+    const tokens = await volatilePair.tokens();
+
+    expect(tokens[0]).to.be.equal(token0.address);
+    expect(tokens[1]).to.be.equal(token1.address);
+  });
+
+  describe("Oracle functionality", () => {
+    it("reverts if the first observation is stale", async () => {
+      await expect(
+        volatilePair.getTokenPrice(tokenA.address, parseEther("1"))
+      ).to.revertedWith("Pair: Missing observation");
+    });
+
+    it("returns a TWAP", async () => {
+      // * 1 Token A === 0.5 Token B
+      // * 2 Token B === 2 Token A
+      await Promise.all([
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("500")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("250")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      const amountOut = await volatilePair.getAmountOut(
+        tokenA.address,
+        parseEther("2")
+      );
+
+      await tokenA
+        .connect(alice)
+        .transfer(volatilePair.address, parseEther("2"));
+
+      const amount0Out = tokenA.address > tokenB.address ? amountOut : 0;
+      const amount1Out = tokenA.address > tokenB.address ? 0 : amountOut;
+
+      await volatilePair
+        .connect(alice)
+        .swap(amount0Out, amount1Out, alice.address, []);
+
+      await expect(
+        volatilePair.getTokenPrice(tokenA.address, parseEther("1"))
+      ).to.revertedWith("Pair: Missing observation");
+
+      const advanceAndSwap = async () => {
+        for (let i = 0; i < 13; i++) {
+          await advanceBlockAndTime(PERIOD_SIZE + 1, ethers);
+
+          const amountOut = await volatilePair.getAmountOut(
+            tokenA.address,
+            parseEther("1")
+          );
+
+          await tokenA
+            .connect(alice)
+            .transfer(volatilePair.address, parseEther("1"));
+
+          const amount0Out = tokenA.address > tokenB.address ? amountOut : 0;
+          const amount1Out = tokenA.address > tokenB.address ? 0 : amountOut;
+
+          await volatilePair
+            .connect(alice)
+            .swap(amount0Out, amount1Out, alice.address, []);
+        }
+      };
+
+      await advanceAndSwap();
+
+      await network.provider.send("evm_setAutomine", [false]);
+
+      const blockTimestamp = await (
+        await ethers.provider.getBlock(await ethers.provider.getBlockNumber())
+      ).timestamp;
+
+      const [reserve0Cumulative, reserve1Cumulative] =
+        await volatilePair.currentCumulativeReserves();
+
+      const firstObservation = await volatilePair.getFirstObservationInWindow();
+
+      const timeElapsed = ethers.BigNumber.from(blockTimestamp + 100).sub(
+        firstObservation.timestamp
+      );
+
+      const reserve0 = reserve0Cumulative
+        .sub(firstObservation.reserve0Cumulative)
+        .div(timeElapsed);
+
+      const reserve1 = reserve1Cumulative
+        .sub(firstObservation.reserve1Cumulative)
+        .div(timeElapsed);
+
+      const reserveA = tokenA.address > tokenB.address ? reserve1 : reserve0;
+      const reserveB = tokenA.address > tokenB.address ? reserve0 : reserve1;
+
+      await network.provider.send("evm_increaseTime", [100]);
+
+      const tx = volatilePair.getTokenPrice(tokenA.address, parseEther("1"));
+
+      await network.provider.send("evm_mine");
+      await network.provider.send("evm_setAutomine", [true]);
+
+      const price = await tx;
+
+      expect(price).to.be.closeTo(
+        parseEther("1")
+          .mul(reserveB)
+          .div(reserveA.add(parseEther("1"))),
+        parseEther("0.0001")
+      );
+
+      // * 86400 is the window size
+      await advanceBlockAndTime(86400, ethers);
+
+      await expect(
+        volatilePair.getTokenPrice(tokenA.address, parseEther("1"))
+      ).to.revertedWith("Pair: Missing observation");
+    });
+  });
+
+  describe("function: mint", () => {
+    it("reverts if you do not send enough liquidity", async () => {
+      await expect(volatilePair.mint(alice.address)).to.reverted;
+
+      await tokenA
+        .connect(alice)
+        .transfer(volatilePair.address, parseEther("12"));
+
+      await expect(volatilePair.mint(alice.address)).to.reverted;
+
+      await Promise.all([
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("12")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("5")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      tokenA.connect(alice).transfer(volatilePair.address, parseEther("12"));
+
+      await expect(volatilePair.mint(alice.address)).to.revertedWith(
+        "Pair: low liquidity"
+      );
+    });
+
+    it("has a reentrancy guard", async () => {
+      const brokenToken = (await deploy("ERC20RMint", [
+        "Broken Token",
+        "BT",
+      ])) as ERC20RMint;
+
+      await factory.createPair(tokenA.address, brokenToken.address, false);
+      const pairAddress = await factory.getPair(
+        tokenA.address,
+        brokenToken.address,
+        false
+      );
+
+      const brokenPair = (await ethers.getContractFactory("Pair")).attach(
+        pairAddress
+      );
+
+      await brokenToken.mint(alice.address, parseEther("100"));
+
+      await Promise.all([
+        tokenA.connect(alice).transfer(brokenPair.address, parseEther("10")),
+        brokenToken
+          .connect(alice)
+          .transfer(brokenPair.address, parseEther("10")),
+      ]);
+
+      await expect(brokenPair.mint(alice.address)).to.revertedWith(
+        "Pair: Reentrancy"
+      );
+    });
+
+    it.only("mints the right amount of LP tokens", async () => {
+      const [aliceBalance, addressZeroBalance] = await Promise.all([
+        volatilePair.balanceOf(alice.address),
+        volatilePair.balanceOf(ethers.constants.AddressZero),
+      ]);
+
+      expect(aliceBalance).to.be.equal(0);
+      expect(addressZeroBalance).to.be.equal(0);
+
+      await Promise.all([
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("100")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("50")),
+      ]);
+
+      const amount0 =
+        tokenA.address > tokenB.address ? parseEther("50") : parseEther("100");
+      const amount1 =
+        tokenA.address > tokenB.address ? parseEther("100") : parseEther("50");
+
+      await expect(volatilePair.mint(alice.address))
+        .to.emit(volatilePair, "Mint")
+        .withArgs(owner.address, amount0, amount1);
+
+      const [aliceBalance2, addressZeroBalance2] = await Promise.all([
+        volatilePair.balanceOf(alice.address),
+        volatilePair.balanceOf(ethers.constants.AddressZero),
+      ]);
+
+      expect(aliceBalance2).to.be.equal(
+        sqrt(amount0.mul(amount1)).sub(MINIMUM_LIQUIDITY)
+      );
+      expect(addressZeroBalance2).to.be.equal(MINIMUM_LIQUIDITY);
+
+      await Promise.all([
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("150")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("100")),
+      ]);
+
+      const _amount0 =
+        tokenA.address > tokenB.address ? parseEther("100") : parseEther("150");
+      const _amount1 =
+        tokenA.address > tokenB.address ? parseEther("150") : parseEther("100");
+
+      await expect(volatilePair.mint(alice.address))
+        .to.emit(volatilePair, "Mint")
+        .withArgs(owner.address, _amount0, _amount1);
+
+      const [aliceBalance3, addressZeroBalance3] = await Promise.all([
+        volatilePair.balanceOf(alice.address),
+        volatilePair.balanceOf(ethers.constants.AddressZero),
+      ]);
+
+      expect(aliceBalance3).to.be.equal(
+        min(
+          _amount0.mul(MINIMUM_LIQUIDITY.add(aliceBalance2)).div(amount0),
+          _amount1.mul(MINIMUM_LIQUIDITY.add(aliceBalance2)).div(amount1)
+        ).add(aliceBalance2)
+      );
+      expect(addressZeroBalance3).to.be.equal(MINIMUM_LIQUIDITY);
     });
   });
 });

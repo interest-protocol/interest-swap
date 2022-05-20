@@ -9,6 +9,7 @@ import "./lib/Math.sol";
 import "./lib/Address.sol";
 
 import "./Fees.sol";
+import "hardhat/console.sol";
 
 struct Observation {
     uint256 timestamp;
@@ -127,43 +128,28 @@ contract Pair is IERC20 {
         // Set the swap fee. 0.05% for stable swaps and 0.3% for volatile swaps
         swapFee = _stable ? 0.0005e18 : 0.003e18;
 
-        // Set the name and symbol of the LP token
-        if (_stable) {
-            name = string(
-                abi.encodePacked(
-                    "Int Stable LP - ",
-                    _token0.safeSymbol(),
-                    "/",
-                    _token1.safeSymbol()
-                )
-            );
-            symbol = string(
-                abi.encodePacked(
-                    "sILP-",
-                    _token0.safeSymbol(),
-                    "/",
-                    _token1.safeSymbol()
-                )
-            );
-        } else {
-            name = string(
-                abi.encodePacked(
-                    "Int Volatile LP - ",
-                    _token0.safeSymbol(),
-                    "/",
-                    _token1.safeSymbol()
-                )
-            );
-            symbol = string(
-                abi.encodePacked(
-                    "vILP-",
-                    _token0.safeSymbol(),
-                    "/",
-                    _token1.safeSymbol()
-                )
-            );
-        }
+        string memory _name = string(
+            abi.encodePacked(
+                _stable ? "Int Stable LP - " : "Int Volatile LP - ",
+                _token0.safeSymbol(),
+                "/",
+                _token1.safeSymbol()
+            )
+        );
 
+        // Set the name and symbol of the LP token
+        name = _name;
+
+        symbol = string(
+            abi.encodePacked(
+                _stable ? "sILP-" : "vILP-",
+                _token0.safeSymbol(),
+                "/",
+                _token1.safeSymbol()
+            )
+        );
+
+        // Set decimals in terms of 1 unit
         decimals0 = 10**_token0.safeDecimals();
         decimals1 = 10**_token1.safeDecimals();
 
@@ -171,9 +157,22 @@ contract Pair is IERC20 {
         for (uint256 i = observations.length; i < GRANULARITY; i++) {
             observations.push();
         }
+
+        // set up the domain_separator
+        DOMAIN_SEPARATOR = keccak256(
+            abi.encode(
+                keccak256(
+                    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+                ),
+                keccak256(bytes(_name)),
+                keccak256("v1"),
+                block.chainid,
+                address(this)
+            )
+        );
     }
 
-    // Basic nonreentrant guard
+    // Basic nonreentrancy guard
     uint256 private _unlocked = 1;
     modifier lock() {
         require(_unlocked == 1, "Pair: Reentrancy");
@@ -188,6 +187,22 @@ contract Pair is IERC20 {
      */
     function observationLength() external view returns (uint256) {
         return observations.length;
+    }
+
+    /**
+     * @dev returns the observation from the oldest epoch (at the beginning of the window) relative to the current time
+     *
+     * @return firstObservation the first observation of the current epoch considering the TWAP is up to date.
+     */
+    function getFirstObservationInWindow()
+        public
+        view
+        returns (Observation memory firstObservation)
+    {
+        uint256 observationIndex = observationIndexOf(block.timestamp);
+        // no overflow issue. if observationIndex + 1 overflows, result is still zero.
+        uint256 firstObservationIndex = (observationIndex + 1) % GRANULARITY;
+        firstObservation = observations[firstObservationIndex];
     }
 
     /**
@@ -400,7 +415,7 @@ contract Pair is IERC20 {
         returns (uint256 amountOut)
     {
         // Find the first observation in the 24 hour window.
-        Observation memory firstObservation = _getFirstObservationInWindow();
+        Observation memory firstObservation = getFirstObservationInWindow();
 
         // Find out how much time has passed since the last observation. Should be less than 24 hours or the price is stale.
         uint256 timeElapsed = block.timestamp - firstObservation.timestamp;
@@ -469,6 +484,7 @@ contract Pair is IERC20 {
                 (_amount1 * _totalSupply) / _reserve1
             );
         }
+
         // Must provide enough liquidity
         require(liquidity > 0, "Pair: low liquidity");
         // Send the LP tokens
@@ -692,17 +708,7 @@ contract Pair is IERC20 {
         bytes32 s
     ) external {
         require(deadline >= block.timestamp, "Pair: Expired");
-        DOMAIN_SEPARATOR = keccak256(
-            abi.encode(
-                keccak256(
-                    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
-                ),
-                keccak256(bytes(name)),
-                keccak256("v1"),
-                block.chainid,
-                address(this)
-            )
-        );
+
         bytes32 digest = keccak256(
             abi.encodePacked(
                 "\x19\x01",
@@ -719,11 +725,14 @@ contract Pair is IERC20 {
                 )
             )
         );
+
         address recoveredAddress = ecrecover(digest, v, r, s);
+
         require(
             recoveredAddress != address(0) && recoveredAddress == owner,
             "Pair: invalid signature"
         );
+
         allowance[owner][spender] = value;
 
         emit Approval(owner, spender, value);
@@ -975,22 +984,6 @@ contract Pair is IERC20 {
             supplyIndex0[recipient] = index0;
             supplyIndex1[recipient] = index1;
         }
-    }
-
-    /**
-     * @dev returns the observation from the oldest epoch (at the beginning of the window) relative to the current time
-     *
-     * @return firstObservation the first observation of the current epoch considering the TWAP is up to date.
-     */
-    function _getFirstObservationInWindow()
-        private
-        view
-        returns (Observation memory firstObservation)
-    {
-        uint256 observationIndex = observationIndexOf(block.timestamp);
-        // no overflow issue. if observationIndex + 1 overflows, result is still zero.
-        uint256 firstObservationIndex = (observationIndex + 1) % GRANULARITY;
-        firstObservation = observations[firstObservationIndex];
     }
 
     /**

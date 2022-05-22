@@ -252,6 +252,24 @@ contract Pair is IERC20 {
         );
     }
 
+    function getAccountFeesRewards(address account)
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256,
+            uint256
+        )
+    {
+        return (
+            supplyIndex0[account],
+            supplyIndex1[account],
+            claimable0[account],
+            claimable1[account]
+        );
+    }
+
     /**
      * @dev Collect the fees earned by a LP provider.
      */
@@ -517,19 +535,19 @@ contract Pair is IERC20 {
         uint256 _balance1 = _token1.currentBalance();
 
         // Find out how many tokens the user wishes to remove
-        uint256 _liquidity = balanceOf[address(this)];
+        uint256 tokensToBurn = balanceOf[address(this)];
 
         // Save gas
         uint256 _totalSupply = totalSupply;
         // Calculate how much liquidity to be removed
-        amount0 = (_liquidity * _balance0) / _totalSupply; // using balances ensures pro-rata distribution
-        amount1 = (_liquidity * _balance1) / _totalSupply; // using balances ensures pro-rata distribution
+        amount0 = (tokensToBurn * _balance0) / _totalSupply; // using balances ensures pro-rata distribution
+        amount1 = (tokensToBurn * _balance1) / _totalSupply; // using balances ensures pro-rata distribution
 
         // There must have been tokens sent to this contract to remove liquidity
         require(amount0 > 0 && amount1 > 0, "Pair: not enough liquidity");
 
         // Burn the tokens sent without updating the fees as pair keeps no fees.
-        _burn(address(this), _liquidity);
+        _burn(address(this), tokensToBurn);
 
         // Send the tokens
         _token0.safeTransfer(to, amount0);

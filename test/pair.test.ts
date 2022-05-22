@@ -57,10 +57,10 @@ describe("Pair", () => {
     );
 
     await Promise.all([
-      tokenA.mint(alice.address, parseEther("1000")),
-      tokenA.mint(bob.address, parseEther("1000")),
-      tokenB.mint(alice.address, parseEther("500")),
-      tokenB.mint(bob.address, parseEther("500")),
+      tokenA.mint(alice.address, parseEther("10000")),
+      tokenA.mint(bob.address, parseEther("10000")),
+      tokenB.mint(alice.address, parseEther("5000")),
+      tokenB.mint(bob.address, parseEther("5000")),
     ]);
   });
 
@@ -599,7 +599,7 @@ describe("Pair", () => {
       );
     });
 
-    it.only("mints the right amount of LP tokens", async () => {
+    it("mints the right amount of LP tokens", async () => {
       const [aliceBalance, addressZeroBalance] = await Promise.all([
         volatilePair.balanceOf(alice.address),
         volatilePair.balanceOf(ethers.constants.AddressZero),
@@ -659,5 +659,597 @@ describe("Pair", () => {
       );
       expect(addressZeroBalance3).to.be.equal(MINIMUM_LIQUIDITY);
     });
+
+    it("updates the fees earned on mint", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await expect(volatilePair.mint(alice.address));
+
+      const swapTokenA = async () => {
+        for (let i = 0; i < 4; i++) {
+          const amountOut = await volatilePair.getAmountOut(
+            tokenA.address,
+            parseEther("10")
+          );
+
+          await tokenA
+            .connect(alice)
+            .transfer(volatilePair.address, parseEther("10"));
+
+          const amount0Out = tokenA.address > tokenB.address ? amountOut : 0;
+          const amount1Out = tokenA.address > tokenB.address ? 0 : amountOut;
+
+          await volatilePair
+            .connect(alice)
+            .swap(amount0Out, amount1Out, alice.address, []);
+        }
+      };
+
+      const swapTokenB = async () => {
+        for (let i = 0; i < 4; i++) {
+          const amountOut = await volatilePair.getAmountOut(
+            tokenB.address,
+            parseEther("10")
+          );
+
+          await tokenB
+            .connect(alice)
+            .transfer(volatilePair.address, parseEther("10"));
+
+          const amount0Out = tokenA.address > tokenB.address ? 0 : amountOut;
+          const amount1Out = tokenA.address > tokenB.address ? amountOut : 0;
+
+          await volatilePair
+            .connect(alice)
+            .swap(amount0Out, amount1Out, alice.address, []);
+        }
+      };
+
+      await swapTokenA();
+      await swapTokenB();
+
+      const [bobSupplyIndex0, bobSupplyIndex1] = await Promise.all([
+        volatilePair.supplyIndex0(bob.address),
+        volatilePair.supplyIndex1(bob.address),
+      ]);
+
+      expect(bobSupplyIndex0).to.be.equal(0);
+      expect(bobSupplyIndex1).to.be.equal(0);
+
+      await Promise.all([
+        tokenA.connect(bob).transfer(volatilePair.address, parseEther("150")),
+        tokenB.connect(bob).transfer(volatilePair.address, parseEther("100")),
+      ]);
+
+      await expect(volatilePair.mint(bob.address)).to.emit(
+        volatilePair,
+        "Sync"
+      );
+
+      const [
+        bobSupply2Index0,
+        bobSupply2Index1,
+        indexTwo0,
+        indexTwo1,
+        bobClaimableTwo0,
+        bobClaimableTwo1,
+      ] = await Promise.all([
+        volatilePair.supplyIndex0(bob.address),
+        volatilePair.supplyIndex1(bob.address),
+        volatilePair.index0(),
+        volatilePair.index1(),
+        volatilePair.claimable0(bob.address),
+        volatilePair.claimable1(bob.address),
+      ]);
+
+      expect(indexTwo0.gt(0)).to.be.equal(true);
+      expect(indexTwo1.gt(0)).to.be.equal(true);
+      expect(bobSupply2Index0).to.be.equal(indexTwo0);
+      expect(bobSupply2Index1).to.be.equal(indexTwo1);
+      expect(bobClaimableTwo0).to.be.equal(0);
+      expect(bobClaimableTwo1).to.be.equal(0);
+    });
+
+    it("updates the reserves after every mint", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      const [reserve0, reserve1, blockTimestampLast] =
+        await volatilePair.getReserves();
+
+      expect(reserve0).to.be.equal(0);
+      expect(reserve1).to.be.equal(0);
+
+      await volatilePair.mint(alice.address);
+
+      const [reserveTwo0, reserveTwo1, blockTimestampLastTwo] =
+        await volatilePair.getReserves();
+
+      const amount0 =
+        tokenA.address > tokenB.address
+          ? parseEther("500")
+          : parseEther("1000");
+
+      const amount1 =
+        tokenA.address > tokenB.address
+          ? parseEther("1000")
+          : parseEther("500");
+
+      expect(blockTimestampLastTwo.gt(blockTimestampLast)).to.be.equal(true);
+      expect(reserveTwo0).to.be.equal(amount0);
+      expect(reserveTwo1).to.be.equal(amount1);
+    });
+  });
+
+  describe("function: burn", () => {
+    it("reverts if there is no supply or there are no tokens to burn", async () => {
+      await expect(volatilePair.burn(alice.address)).to.reverted;
+
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      await expect(volatilePair.burn(alice.address)).to.revertedWith(
+        "Pair: not enough liquidity"
+      );
+    });
+
+    it("reverts if there is a reentrancy attempt", async () => {
+      const brokenToken = (await deploy("ERC20RMint", [
+        "Broken Token",
+        "BT",
+      ])) as ERC20RMint;
+
+      await factory.createPair(tokenA.address, brokenToken.address, false);
+      const pairAddress = await factory.getPair(
+        tokenA.address,
+        brokenToken.address,
+        false
+      );
+
+      const brokenPair = (await ethers.getContractFactory("Pair")).attach(
+        pairAddress
+      );
+
+      await brokenToken.mint(alice.address, parseEther("100"));
+
+      await Promise.all([
+        tokenA.connect(alice).transfer(brokenPair.address, parseEther("10")),
+        brokenToken
+          .connect(alice)
+          .transfer(brokenPair.address, parseEther("10")),
+      ]);
+
+      await expect(brokenPair.burn(alice.address)).to.revertedWith(
+        "Pair: Reentrancy"
+      );
+    });
+
+    it("burns the right amount of tokens", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      const [
+        aliceTokenABalance,
+        aliceTokenBBalance,
+        aliceVolatilePairBalance,
+        totalSupply,
+      ] = await Promise.all([
+        tokenA.balanceOf(alice.address),
+        tokenB.balanceOf(alice.address),
+        volatilePair.balanceOf(alice.address),
+        volatilePair.totalSupply(),
+      ]);
+
+      const tokensToBurn = aliceVolatilePairBalance.div(3);
+
+      await volatilePair
+        .connect(alice)
+        .transfer(volatilePair.address, tokensToBurn);
+
+      const balance0 =
+        tokenA.address > tokenB.address
+          ? parseEther("500")
+          : parseEther("1000");
+
+      const balance1 =
+        tokenA.address > tokenB.address
+          ? parseEther("1000")
+          : parseEther("500");
+
+      const amount0 = tokensToBurn.mul(balance0).div(totalSupply);
+      const amount1 = tokensToBurn.mul(balance1).div(totalSupply);
+
+      await expect(volatilePair.burn(alice.address))
+        .to.emit(volatilePair, "Burn")
+        .withArgs(owner.address, amount0, amount1, alice.address);
+
+      const [aliceTokenABalance2, aliceTokenBBalance2, volatilePairBalance2] =
+        await Promise.all([
+          tokenA.balanceOf(alice.address),
+          tokenB.balanceOf(alice.address),
+          volatilePair.balanceOf(volatilePair.address),
+        ]);
+
+      const aliceToken0Balance =
+        tokenA.address > tokenB.address
+          ? aliceTokenBBalance
+          : aliceTokenABalance;
+
+      const aliceToken1Balance =
+        tokenA.address > tokenB.address
+          ? aliceTokenABalance
+          : aliceTokenBBalance;
+
+      const aliceToken0Balance2 =
+        tokenA.address > tokenB.address
+          ? aliceTokenBBalance2
+          : aliceTokenABalance2;
+
+      const aliceToken1Balance2 =
+        tokenA.address > tokenB.address
+          ? aliceTokenABalance2
+          : aliceTokenBBalance2;
+
+      expect(aliceToken0Balance2).to.be.equal(aliceToken0Balance.add(amount0));
+      expect(aliceToken1Balance2).to.be.equal(aliceToken1Balance.add(amount1));
+      expect(volatilePairBalance2).to.be.equal(0);
+    });
+
+    it("updates the fees rewards on burn", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      const swapTokenA = async () => {
+        for (let i = 0; i < 4; i++) {
+          const amountOut = await volatilePair.getAmountOut(
+            tokenA.address,
+            parseEther("10")
+          );
+
+          await tokenA
+            .connect(alice)
+            .transfer(volatilePair.address, parseEther("10"));
+
+          const amount0Out = tokenA.address > tokenB.address ? amountOut : 0;
+          const amount1Out = tokenA.address > tokenB.address ? 0 : amountOut;
+
+          await volatilePair
+            .connect(alice)
+            .swap(amount0Out, amount1Out, alice.address, []);
+        }
+      };
+
+      const swapTokenB = async () => {
+        for (let i = 0; i < 4; i++) {
+          const amountOut = await volatilePair.getAmountOut(
+            tokenB.address,
+            parseEther("10")
+          );
+
+          await tokenB
+            .connect(alice)
+            .transfer(volatilePair.address, parseEther("10"));
+
+          const amount0Out = tokenA.address > tokenB.address ? 0 : amountOut;
+          const amount1Out = tokenA.address > tokenB.address ? amountOut : 0;
+
+          await volatilePair
+            .connect(alice)
+            .swap(amount0Out, amount1Out, alice.address, []);
+        }
+      };
+
+      const aliceVolatilePairBalance = await volatilePair.balanceOf(
+        alice.address
+      );
+
+      const tokensToBurn = aliceVolatilePairBalance.div(3);
+
+      await volatilePair
+        .connect(alice)
+        .transfer(volatilePair.address, tokensToBurn);
+
+      await swapTokenA();
+      await swapTokenB();
+
+      const [
+        index0,
+        index1,
+        supplyIndex0,
+        supplyIndex1,
+        claimable0,
+        claimable1,
+      ] = await Promise.all([
+        volatilePair.index0(),
+        volatilePair.index1(),
+        volatilePair.supplyIndex0(volatilePair.address),
+        volatilePair.supplyIndex1(volatilePair.address),
+        volatilePair.claimable0(volatilePair.address),
+        volatilePair.claimable1(volatilePair.address),
+      ]);
+
+      expect(index0.gt(0)).to.be.equal(true);
+      expect(index1.gt(0)).to.be.equal(true);
+      expect(supplyIndex0).to.be.equal(0);
+      expect(supplyIndex1).to.be.equal(0);
+      expect(claimable0).to.be.equal(0);
+      expect(claimable1).to.be.equal(0);
+
+      await volatilePair.burn(alice.address);
+
+      const [supplyIndexTwo0, supplyIndexTwo1, claimableTwo0, claimableTwo1] =
+        await Promise.all([
+          volatilePair.supplyIndex0(volatilePair.address),
+          volatilePair.supplyIndex1(volatilePair.address),
+          volatilePair.claimable0(volatilePair.address),
+          volatilePair.claimable1(volatilePair.address),
+        ]);
+
+      expect(supplyIndexTwo0).to.be.equal(index0);
+      expect(supplyIndexTwo1).to.be.equal(index1);
+      expect(claimableTwo0).to.be.equal(
+        tokensToBurn.mul(index0).div(parseEther("1"))
+      );
+      expect(claimableTwo1).to.be.equal(
+        tokensToBurn.mul(index1).div(parseEther("1"))
+      );
+    });
+
+    it("updates the reserves after each burn", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await expect(volatilePair.mint(alice.address));
+
+      const [
+        aliceVolatilePairBalance,
+        totalSupply,
+        [reserve0, reserve1, blockTimestampLast],
+      ] = await Promise.all([
+        volatilePair.balanceOf(alice.address),
+        volatilePair.totalSupply(),
+        volatilePair.getReserves(),
+      ]);
+
+      const tokensToBurn = aliceVolatilePairBalance.div(3);
+
+      await volatilePair
+        .connect(alice)
+        .transfer(volatilePair.address, tokensToBurn);
+
+      const balance0 =
+        tokenA.address > tokenB.address
+          ? parseEther("500")
+          : parseEther("1000");
+
+      const balance1 =
+        tokenA.address > tokenB.address
+          ? parseEther("1000")
+          : parseEther("500");
+
+      const amount0 = tokensToBurn.mul(balance0).div(totalSupply);
+      const amount1 = tokensToBurn.mul(balance1).div(totalSupply);
+
+      expect(reserve0).to.be.equal(balance0);
+      expect(reserve1).to.be.equal(balance1);
+
+      await expect(volatilePair.burn(alice.address)).to.emit(
+        volatilePair,
+        "Sync"
+      );
+
+      const [reserveTwo0, reserveTwo1, blockTimestampLastTwo] =
+        await volatilePair.getReserves();
+
+      expect(reserveTwo0).to.be.equal(reserve0.sub(amount0));
+      expect(reserveTwo1).to.be.equal(reserve1.sub(amount1));
+      expect(blockTimestampLastTwo.gt(blockTimestampLast)).to.be.equal(true);
+    });
+  });
+
+  it("updates the fee rewards for the sender and recipient on transfer", async () => {
+    await Promise.all([
+      tokenA.connect(alice).transfer(volatilePair.address, parseEther("1000")),
+      tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+    ]);
+
+    await volatilePair.mint(alice.address);
+
+    await Promise.all([
+      tokenA.connect(bob).transfer(volatilePair.address, parseEther("700")),
+      tokenB.connect(bob).transfer(volatilePair.address, parseEther("250")),
+    ]);
+
+    await volatilePair.mint(bob.address);
+
+    const swapTokenA = async () => {
+      for (let i = 0; i < 4; i++) {
+        const amountOut = await volatilePair.getAmountOut(
+          tokenA.address,
+          parseEther("10")
+        );
+
+        await tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("10"));
+
+        const amount0Out = tokenA.address > tokenB.address ? amountOut : 0;
+        const amount1Out = tokenA.address > tokenB.address ? 0 : amountOut;
+
+        await volatilePair
+          .connect(alice)
+          .swap(amount0Out, amount1Out, alice.address, []);
+      }
+    };
+
+    const swapTokenB = async () => {
+      for (let i = 0; i < 4; i++) {
+        const amountOut = await volatilePair.getAmountOut(
+          tokenB.address,
+          parseEther("10")
+        );
+
+        await tokenB
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("10"));
+
+        const amount0Out = tokenA.address > tokenB.address ? 0 : amountOut;
+        const amount1Out = tokenA.address > tokenB.address ? amountOut : 0;
+
+        await volatilePair
+          .connect(alice)
+          .swap(amount0Out, amount1Out, alice.address, []);
+      }
+    };
+
+    await swapTokenA();
+    await swapTokenB();
+
+    const [
+      [aliceSupplyIndex0, aliceSupplyIndex1, aliceClaimable0, aliceClaimable1],
+      [bobSupplyIndex0, bobSupplyIndex1, bobClaimable0, bobClaimable1],
+      volatilePairAliceBalance,
+      volatilePairBobBalance,
+    ] = await Promise.all([
+      volatilePair.getAccountFeesRewards(alice.address),
+      volatilePair.getAccountFeesRewards(bob.address),
+      volatilePair.balanceOf(alice.address),
+      volatilePair.balanceOf(bob.address),
+    ]);
+
+    expect(aliceSupplyIndex0).to.be.equal(0);
+    expect(aliceSupplyIndex1).to.be.equal(0);
+    expect(aliceClaimable0).to.be.equal(0);
+    expect(aliceClaimable1).to.be.equal(0);
+
+    expect(bobSupplyIndex0).to.be.equal(0);
+    expect(bobSupplyIndex1).to.be.equal(0);
+    expect(bobClaimable0).to.be.equal(0);
+    expect(bobClaimable1).to.be.equal(0);
+
+    const tokensToSend = volatilePairAliceBalance.div(3);
+
+    await volatilePair.connect(alice).transfer(bob.address, tokensToSend);
+
+    const [
+      [
+        aliceSupplyIndexTwo0,
+        aliceSupplyIndexTwo1,
+        aliceClaimableTwo0,
+        aliceClaimableTwo1,
+      ],
+      [
+        bobSupplyIndexTwo0,
+        bobSupplyIndexTwo1,
+        bobClaimableTwo0,
+        bobClaimableTwo1,
+      ],
+      index0,
+      index1,
+    ] = await Promise.all([
+      volatilePair.getAccountFeesRewards(alice.address),
+      volatilePair.getAccountFeesRewards(bob.address),
+      volatilePair.index0(),
+      volatilePair.index1(),
+    ]);
+
+    expect(aliceSupplyIndexTwo0).to.be.equal(index0);
+    expect(aliceSupplyIndexTwo1).to.be.equal(index1);
+    expect(aliceClaimableTwo0).to.be.equal(
+      volatilePairAliceBalance.mul(index0).div(parseEther("1"))
+    );
+    expect(aliceClaimableTwo1).to.be.equal(
+      volatilePairAliceBalance.mul(index1).div(parseEther("1"))
+    );
+
+    expect(bobSupplyIndexTwo0).to.be.equal(index0);
+    expect(bobSupplyIndexTwo1).to.be.equal(index1);
+    expect(bobClaimableTwo0).to.be.equal(
+      volatilePairBobBalance.mul(index0).div(parseEther("1"))
+    );
+    expect(bobClaimableTwo1).to.be.equal(
+      volatilePairBobBalance.mul(index1).div(parseEther("1"))
+    );
+  });
+
+  it.only("forces the reserves to match the balances by sending", async () => {
+    await Promise.all([
+      tokenA.connect(alice).transfer(volatilePair.address, parseEther("1000")),
+      tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+    ]);
+
+    await volatilePair.mint(alice.address);
+
+    await Promise.all([
+      tokenA.connect(alice).transfer(volatilePair.address, parseEther("40")),
+      tokenB.connect(alice).transfer(volatilePair.address, parseEther("15")),
+    ]);
+
+    const [[reserve0, reserve1], tokenABalance, tokenBBalance] =
+      await Promise.all([
+        volatilePair.getReserves(),
+        tokenA.balanceOf(volatilePair.address),
+        tokenB.balanceOf(volatilePair.address),
+      ]);
+
+    const balance0 =
+      tokenA.address > tokenB.address ? tokenBBalance : tokenABalance;
+    const balance1 =
+      tokenA.address > tokenB.address ? tokenABalance : tokenBBalance;
+
+    expect(balance0.gt(reserve0)).to.be.equal(true);
+    expect(balance1.gt(reserve1)).to.be.equal(true);
+
+    await expect(volatilePair.skim(owner.address))
+      .to.emit(tokenA, "Transfer")
+      .withArgs(volatilePair.address, owner.address, parseEther("40"))
+      .to.emit(tokenB, "Transfer")
+      .withArgs(volatilePair.address, owner.address, parseEther("15"));
+
+    const [[reserveTwo0, reserveTwo1], tokenABalanceTwo, tokenBBalanceTwo] =
+      await Promise.all([
+        volatilePair.getReserves(),
+        tokenA.balanceOf(volatilePair.address),
+        tokenB.balanceOf(volatilePair.address),
+      ]);
+
+    const balanceTwo0 =
+      tokenA.address > tokenB.address ? tokenBBalanceTwo : tokenABalanceTwo;
+    const balanceTwo1 =
+      tokenA.address > tokenB.address ? tokenABalanceTwo : tokenBBalanceTwo;
+
+    expect(balanceTwo0.eq(reserveTwo0)).to.be.equal(true);
+    expect(balanceTwo1.eq(reserveTwo1)).to.be.equal(true);
   });
 });

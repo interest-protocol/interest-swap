@@ -1203,53 +1203,235 @@ describe("Pair", () => {
     );
   });
 
-  it.only("forces the reserves to match the balances by sending", async () => {
-    await Promise.all([
-      tokenA.connect(alice).transfer(volatilePair.address, parseEther("1000")),
-      tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
-    ]);
+  describe("function: skim", () => {
+    it("reverts if the caller tries to reenter", async () => {
+      const brokenToken = (await deploy("ERC20RMint", [
+        "Broken Token",
+        "BT",
+      ])) as ERC20RMint;
 
-    await volatilePair.mint(alice.address);
+      await factory.createPair(tokenA.address, brokenToken.address, false);
+      const pairAddress = await factory.getPair(
+        tokenA.address,
+        brokenToken.address,
+        false
+      );
 
-    await Promise.all([
-      tokenA.connect(alice).transfer(volatilePair.address, parseEther("40")),
-      tokenB.connect(alice).transfer(volatilePair.address, parseEther("15")),
-    ]);
+      const brokenPair = (await ethers.getContractFactory("Pair")).attach(
+        pairAddress
+      );
 
-    const [[reserve0, reserve1], tokenABalance, tokenBBalance] =
+      await brokenToken.mint(alice.address, parseEther("100"));
+
       await Promise.all([
-        volatilePair.getReserves(),
-        tokenA.balanceOf(volatilePair.address),
-        tokenB.balanceOf(volatilePair.address),
+        tokenA.connect(alice).transfer(brokenPair.address, parseEther("10")),
+        brokenToken
+          .connect(alice)
+          .transfer(brokenPair.address, parseEther("10")),
       ]);
 
-    const balance0 =
-      tokenA.address > tokenB.address ? tokenBBalance : tokenABalance;
-    const balance1 =
-      tokenA.address > tokenB.address ? tokenABalance : tokenBBalance;
-
-    expect(balance0.gt(reserve0)).to.be.equal(true);
-    expect(balance1.gt(reserve1)).to.be.equal(true);
-
-    await expect(volatilePair.skim(owner.address))
-      .to.emit(tokenA, "Transfer")
-      .withArgs(volatilePair.address, owner.address, parseEther("40"))
-      .to.emit(tokenB, "Transfer")
-      .withArgs(volatilePair.address, owner.address, parseEther("15"));
-
-    const [[reserveTwo0, reserveTwo1], tokenABalanceTwo, tokenBBalanceTwo] =
+      await expect(brokenPair.skim(alice.address)).to.revertedWith(
+        "Pair: Reentrancy"
+      );
+    });
+    it("forces the reserves to match the balances by sending", async () => {
       await Promise.all([
-        volatilePair.getReserves(),
-        tokenA.balanceOf(volatilePair.address),
-        tokenB.balanceOf(volatilePair.address),
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
       ]);
 
-    const balanceTwo0 =
-      tokenA.address > tokenB.address ? tokenBBalanceTwo : tokenABalanceTwo;
-    const balanceTwo1 =
-      tokenA.address > tokenB.address ? tokenABalanceTwo : tokenBBalanceTwo;
+      await volatilePair.mint(alice.address);
 
-    expect(balanceTwo0.eq(reserveTwo0)).to.be.equal(true);
-    expect(balanceTwo1.eq(reserveTwo1)).to.be.equal(true);
+      await Promise.all([
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("40")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("15")),
+      ]);
+
+      const [[reserve0, reserve1], tokenABalance, tokenBBalance] =
+        await Promise.all([
+          volatilePair.getReserves(),
+          tokenA.balanceOf(volatilePair.address),
+          tokenB.balanceOf(volatilePair.address),
+        ]);
+
+      const balance0 =
+        tokenA.address > tokenB.address ? tokenBBalance : tokenABalance;
+      const balance1 =
+        tokenA.address > tokenB.address ? tokenABalance : tokenBBalance;
+
+      expect(balance0.gt(reserve0)).to.be.equal(true);
+      expect(balance1.gt(reserve1)).to.be.equal(true);
+
+      await expect(volatilePair.skim(owner.address))
+        .to.emit(tokenA, "Transfer")
+        .withArgs(volatilePair.address, owner.address, parseEther("40"))
+        .to.emit(tokenB, "Transfer")
+        .withArgs(volatilePair.address, owner.address, parseEther("15"));
+
+      const [[reserveTwo0, reserveTwo1], tokenABalanceTwo, tokenBBalanceTwo] =
+        await Promise.all([
+          volatilePair.getReserves(),
+          tokenA.balanceOf(volatilePair.address),
+          tokenB.balanceOf(volatilePair.address),
+        ]);
+
+      const balanceTwo0 =
+        tokenA.address > tokenB.address ? tokenBBalanceTwo : tokenABalanceTwo;
+      const balanceTwo1 =
+        tokenA.address > tokenB.address ? tokenABalanceTwo : tokenBBalanceTwo;
+
+      expect(balanceTwo0.eq(reserveTwo0)).to.be.equal(true);
+      expect(balanceTwo1.eq(reserveTwo1)).to.be.equal(true);
+    });
+  });
+
+  describe("function: sync", () => {
+    it("does not update the reserve cumulatives if no time has passed", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      await network.provider.send("evm_setAutomine", [false]);
+
+      const [reserveCumulative0, reserveCumulative1] = await Promise.all([
+        volatilePair.reserve0CumulativeLast(),
+        volatilePair.reserve1CumulativeLast(),
+      ]);
+
+      await network.provider.send("evm_increaseTime", [27]);
+
+      await volatilePair.sync();
+      await volatilePair.sync();
+
+      await network.provider.send("evm_mine");
+      await network.provider.send("evm_setAutomine", [true]);
+
+      const [reserveCumulativeTwo0, reserveCumulativeTwo1] = await Promise.all([
+        volatilePair.reserve0CumulativeLast(),
+        volatilePair.reserve1CumulativeLast(),
+      ]);
+
+      const reserve0 =
+        tokenA.address > tokenB.address
+          ? parseEther("500")
+          : parseEther("1000");
+
+      const reserve1 =
+        tokenA.address > tokenB.address
+          ? parseEther("1000")
+          : parseEther("500");
+
+      expect(reserveCumulativeTwo0).to.be.equal(
+        reserveCumulative0.add(reserve0.mul(27))
+      );
+
+      expect(reserveCumulativeTwo1).to.be.equal(
+        reserveCumulative1.add(reserve1.mul(27))
+      );
+    });
+
+    it(`only updates an observation every ${PERIOD_SIZE} seconds`, async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      await advanceBlockAndTime(PERIOD_SIZE, ethers);
+
+      await volatilePair.sync();
+      const blockTimestamp = (
+        await ethers.provider.getBlock(await ethers.provider.getBlockNumber())
+      ).timestamp;
+
+      const observation = await volatilePair.observations(
+        await volatilePair.observationIndexOf(blockTimestamp)
+      );
+
+      await advanceBlockAndTime(PERIOD_SIZE / 2, ethers);
+
+      await volatilePair.sync();
+
+      const [observationIndex, reserve0CumulativeLast, reserve1CumulativeLast] =
+        await Promise.all([
+          volatilePair.observationIndexOf(blockTimestamp),
+          volatilePair.reserve0CumulativeLast(),
+          volatilePair.reserve1CumulativeLast(),
+        ]);
+
+      const observationTwo = await volatilePair.observations(observationIndex);
+
+      expect(observationTwo.timestamp).to.be.equal(observation.timestamp);
+      expect(observationTwo.reserve0Cumulative).to.be.equal(
+        observation.reserve0Cumulative
+      );
+      expect(observationTwo.reserve1Cumulative).to.be.equal(
+        observation.reserve1Cumulative
+      );
+
+      expect(
+        reserve0CumulativeLast.gt(observationTwo.reserve0Cumulative)
+      ).to.be.equal(true);
+      expect(
+        reserve1CumulativeLast.gt(observationTwo.reserve1Cumulative)
+      ).to.be.equal(true);
+    });
+
+    it("updates the reserves and blocktimestampLast", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      const [reserve0, reserve1, blocktimestampLast] =
+        await volatilePair.getReserves();
+
+      const amount0 =
+        tokenA.address > tokenB.address
+          ? parseEther("500")
+          : parseEther("1000");
+
+      const amount1 =
+        tokenA.address > tokenB.address
+          ? parseEther("1000")
+          : parseEther("500");
+
+      expect(reserve0).to.be.equal(amount0);
+      expect(reserve1).to.be.equal(amount1);
+
+      await Promise.all([
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("20")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("70")),
+      ]);
+
+      const additionalAmount0 =
+        tokenA.address > tokenB.address ? parseEther("70") : parseEther("20");
+
+      const additionalAmount1 =
+        tokenA.address > tokenB.address ? parseEther("20") : parseEther("70");
+
+      await volatilePair.sync();
+
+      const [reserveTwo0, reserveTwo1, blocktimestampLastTwo] =
+        await volatilePair.getReserves();
+
+      expect(reserveTwo0).to.be.equal(amount0.add(additionalAmount0));
+      expect(reserveTwo1).to.be.equal(amount1.add(additionalAmount1));
+      expect(blocktimestampLastTwo.gt(blocktimestampLast)).to.be.equal(true);
+    });
   });
 });

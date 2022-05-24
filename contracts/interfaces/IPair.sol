@@ -2,6 +2,10 @@
 pragma solidity 0.8.13;
 
 interface IPair {
+    function token0() external view returns (address);
+
+    function token1() external view returns (address);
+
     function transferFrom(
         address src,
         address dst,
@@ -40,5 +44,5 @@ interface IPair {
             uint32 _blockTimestampLast
         );
 
-    function getAmountOut(uint256, address) external view returns (uint256);
+    function getAmountOut(address, uint256) external view returns (uint256);
 }

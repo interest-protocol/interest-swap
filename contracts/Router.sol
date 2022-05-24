@@ -18,7 +18,7 @@ contract Router {
     address public immutable factory;
     //solhint-disable-next-line var-name-mixedcase
     IWBNB public immutable WBNB;
-    uint256 internal constant MINIMUM_LIQUIDITY = 1000;
+    uint256 private constant MINIMUM_LIQUIDITY = 1000;
     bytes32 private immutable pairCodeHash;
 
     constructor(address _factory, IWBNB wbnb) {
@@ -73,7 +73,7 @@ contract Router {
         uint256 amountA,
         uint256 reserveA,
         uint256 reserveB
-    ) internal pure returns (uint256 amountB) {
+    ) private pure returns (uint256 amountB) {
         require(amountA > 0, "Router: no 0 amountA");
         require(reserveA > 0 && reserveB > 0, "Pair: not enough liquidity");
         amountB = (amountA * reserveB) / reserveA;
@@ -105,12 +105,12 @@ contract Router {
         uint256 amountStable;
         uint256 amountVolatile;
         if (IFactory(factory).isPair(pair)) {
-            amountStable = IPair(pair).getAmountOut(amountIn, tokenIn);
+            amountStable = IPair(pair).getAmountOut(tokenIn, amountIn);
         }
 
         pair = pairFor(tokenIn, tokenOut, false);
         if (IFactory(factory).isPair(pair)) {
-            amountVolatile = IPair(pair).getAmountOut(amountIn, tokenIn);
+            amountVolatile = IPair(pair).getAmountOut(tokenIn, amountIn);
         }
         return
             amountStable > amountVolatile
@@ -135,8 +135,8 @@ contract Router {
             );
             if (IFactory(factory).isPair(pair)) {
                 amounts[i + 1] = IPair(pair).getAmountOut(
-                    amounts[i],
-                    routes[i].from
+                    routes[i].from,
+                    amounts[i]
                 );
             }
         }
@@ -349,7 +349,7 @@ contract Router {
             _safeTransferBNB(msg.sender, msg.value - amountWBNB);
     }
 
-    function _safeTransferBNB(address to, uint256 value) internal {
+    function _safeTransferBNB(address to, uint256 value) private {
         //solhint-disable-next-line avoid-low-level-calls
         (bool success, ) = to.call{value: value}("");
         require(success, "Router: BNB transfer failed");

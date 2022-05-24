@@ -1,8 +1,16 @@
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
+import { BigNumber } from "ethers";
 import { ethers, network } from "hardhat";
 
-import { Pair, ERC20, Factory, ERC20Small, ERC20RMint } from "../typechain";
+import {
+  Pair,
+  ERC20,
+  Factory,
+  ERC20Small,
+  ERC20RMint,
+  FlashLoan,
+} from "../typechain";
 
 import {
   multiDeploy,
@@ -22,6 +30,13 @@ const { parseEther } = ethers.utils;
 const PERIOD_SIZE = 86400 / 12;
 
 const MINIMUM_LIQUIDITY = ethers.BigNumber.from(1000);
+
+const VOLATILE_SWAP_FEE = parseEther("0.003");
+
+const GOVERNOR_FEE = parseEther("0.15");
+
+const parseTokenC = (x: string) =>
+  ethers.BigNumber.from(x).mul(BigNumber.from(10).pow(6));
 
 describe("Pair", () => {
   let volatilePair: Pair;
@@ -1433,5 +1448,495 @@ describe("Pair", () => {
       expect(reserveTwo1).to.be.equal(amount1.add(additionalAmount1));
       expect(blocktimestampLastTwo.gt(blocktimestampLast)).to.be.equal(true);
     });
+  });
+
+  describe("function: swap", () => {
+    it("reverts do not wish to get any tokens", async () => {
+      await expect(volatilePair.swap(0, 0, owner.address, [])).to.revertedWith(
+        "Pair: No zero amount"
+      );
+    });
+
+    it("reverts if try to get more than the current reserves", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      const amountOut0 =
+        tokenA.address > tokenB.address
+          ? parseEther("500.1")
+          : parseEther("1000.1");
+
+      const amountOut1 =
+        tokenA.address > tokenB.address
+          ? parseEther("1000.1")
+          : parseEther("500.1");
+
+      await Promise.all([
+        expect(
+          volatilePair.swap(amountOut0, 0, owner.address, [])
+        ).to.revertedWith("Pair: not enough  liquidity"),
+        expect(
+          volatilePair.swap(0, amountOut1, owner.address, [])
+        ).to.revertedWith("Pair: not enough  liquidity"),
+      ]);
+    });
+
+    it("reverts if you try to send tokens to a token address", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      await Promise.all([
+        expect(volatilePair.swap(1, 0, tokenA.address, [])).to.revertedWith(
+          "Pair: invalid to"
+        ),
+        expect(volatilePair.swap(0, 1, tokenB.address, [])).to.revertedWith(
+          "Pair: invalid to"
+        ),
+      ]);
+    });
+
+    it("reverts if you swap without sending any tokens", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      await Promise.all([
+        expect(volatilePair.swap(1, 0, owner.address, [])).to.revertedWith(
+          "Pair: insufficient amount in"
+        ),
+        expect(volatilePair.swap(0, 1, owner.address, [])).to.revertedWith(
+          "Pair: insufficient amount in"
+        ),
+      ]);
+    });
+
+    it("reverts if the K is smaller after the swap", async () => {
+      await factory.createPair(tokenA.address, tokenB.address, true);
+      const stablePairAddress = await factory.getPair(
+        tokenA.address,
+        tokenB.address,
+        true
+      );
+
+      const stablePair = (await ethers.getContractFactory("Pair")).attach(
+        stablePairAddress
+      );
+
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("500")),
+        tokenA.connect(alice).transfer(stablePair.address, parseEther("1000")),
+        tokenB.connect(alice).transfer(stablePair.address, parseEther("1000")),
+      ]);
+
+      await Promise.all([
+        volatilePair.mint(alice.address),
+        stablePair.mint(alice.address),
+      ]);
+
+      await Promise.all([
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("1")),
+        tokenA.connect(alice).transfer(stablePair.address, parseEther("1")),
+      ]);
+
+      const vAmountOut0 = tokenA.address > tokenB.address ? parseEther("1") : 0;
+      const vAmountOut1 = tokenA.address > tokenB.address ? 0 : parseEther("1");
+
+      const sAmountOut0 =
+        tokenA.address > tokenB.address ? parseEther("1.01") : 0;
+      const sAmountOut1 =
+        tokenA.address > tokenB.address ? 0 : parseEther("1.01");
+
+      await Promise.all([
+        expect(
+          volatilePair.swap(vAmountOut0, vAmountOut1, alice.address, [])
+        ).to.revertedWith("Pair: K error"),
+        expect(
+          stablePair.swap(sAmountOut0, sAmountOut1, alice.address, [])
+        ).to.revertedWith("Pair: K error"),
+      ]);
+    });
+
+    it("allows for flash loans", async () => {
+      await Promise.all([
+        tokenA
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("1000.1")),
+        tokenB
+          .connect(alice)
+          .transfer(volatilePair.address, parseEther("500.1")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      const flashLoan = (await deploy("FlashLoan", [
+        volatilePair.address,
+      ])) as FlashLoan;
+
+      await Promise.all([
+        tokenA.connect(alice).transfer(flashLoan.address, parseEther("10")),
+        tokenB.connect(alice).transfer(flashLoan.address, parseEther("10")),
+      ]);
+
+      const data = ethers.utils.defaultAbiCoder.encode(
+        ["string"],
+        ["flashLoan"]
+      );
+
+      const amount0 =
+        tokenA.address > tokenB.address
+          ? parseEther("500")
+          : parseEther("1000");
+
+      const amount1 =
+        tokenA.address > tokenB.address
+          ? parseEther("1000")
+          : parseEther("500");
+
+      await expect(flashLoan.loan(amount0, amount1, flashLoan.address, data))
+        .to.emit(flashLoan, "Hook")
+        .withArgs(flashLoan.address, amount0, amount1, data)
+        .to.emit(tokenA, "Transfer")
+        .withArgs(volatilePair.address, flashLoan.address, parseEther("1000"))
+        .to.emit(tokenB, "Transfer")
+        .withArgs(volatilePair.address, flashLoan.address, parseEther("500"));
+
+      const [balanceA, balanceB] = await Promise.all([
+        tokenA.balanceOf(volatilePair.address),
+        tokenB.balanceOf(volatilePair.address),
+      ]);
+
+      expect(
+        balanceA.gt(
+          parseEther("1000").add(
+            parseEther("1000").mul(VOLATILE_SWAP_FEE).div(parseEther("1"))
+          )
+        )
+      ).to.be.equal(true);
+      expect(
+        balanceB.gt(
+          parseEther("500").add(
+            parseEther("500").mul(VOLATILE_SWAP_FEE).div(parseEther("1"))
+          )
+        )
+      ).to.be.equal(true);
+
+      await Promise.all([
+        tokenA.connect(alice).transfer(flashLoan.address, parseEther("10")),
+        tokenB.connect(alice).transfer(flashLoan.address, parseEther("10")),
+      ]);
+
+      await expect(flashLoan.loan(amount0, 0, flashLoan.address, data))
+        .to.emit(flashLoan, "Hook")
+        .withArgs(flashLoan.address, amount0, 0, data);
+
+      await Promise.all([
+        tokenA.connect(alice).transfer(flashLoan.address, parseEther("10")),
+        tokenB.connect(alice).transfer(flashLoan.address, parseEther("10")),
+      ]);
+
+      await expect(flashLoan.loan(0, amount1, flashLoan.address, data))
+        .to.emit(flashLoan, "Hook")
+        .withArgs(flashLoan.address, 0, amount1, data);
+    });
+
+    it("collects the right amount fees in the fees contract without the governor fee", async () => {
+      const [feesContractAddress] = await Promise.all([
+        volatilePair.feesContract(),
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("500")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("250")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      const [tokenABalance, tokenBBalance] = await Promise.all([
+        tokenA.balanceOf(feesContractAddress),
+        tokenB.balanceOf(feesContractAddress),
+      ]);
+
+      expect(tokenABalance).to.be.equal(0);
+      expect(tokenBBalance).to.be.equal(0);
+
+      const amountOut = await volatilePair.getAmountOut(
+        tokenA.address,
+        parseEther("10")
+      );
+
+      await tokenA
+        .connect(alice)
+        .transfer(volatilePair.address, parseEther("10"));
+
+      const amount0Out = tokenA.address > tokenB.address ? amountOut : 0;
+      const amount1Out = tokenA.address > tokenB.address ? 0 : amountOut;
+
+      await volatilePair
+        .connect(alice)
+        .swap(amount0Out, amount1Out, alice.address, []);
+
+      const [tokenABalance2, tokenBBalance2] = await Promise.all([
+        tokenA.balanceOf(feesContractAddress),
+        tokenB.balanceOf(feesContractAddress),
+      ]);
+
+      expect(tokenABalance2).to.be.equal(
+        parseEther("10").mul(VOLATILE_SWAP_FEE).div(parseEther("1"))
+      );
+      expect(tokenBBalance2).to.be.equal(0);
+
+      const amountOut2 = await volatilePair.getAmountOut(
+        tokenB.address,
+        parseEther("5")
+      );
+
+      await tokenB
+        .connect(alice)
+        .transfer(volatilePair.address, parseEther("5"));
+
+      const amount0Out2 = tokenA.address > tokenB.address ? 0 : amountOut2;
+      const amount1Out2 = tokenA.address > tokenB.address ? amountOut2 : 0;
+
+      await volatilePair
+        .connect(alice)
+        .swap(amount0Out2, amount1Out2, alice.address, []);
+
+      const [
+        tokenABalance3,
+        tokenBBalance3,
+        treasuryTokenABalance,
+        treasuryTokenBBalance,
+      ] = await Promise.all([
+        tokenA.balanceOf(feesContractAddress),
+        tokenB.balanceOf(feesContractAddress),
+        tokenA.balanceOf(treasury.address),
+        tokenB.balanceOf(treasury.address),
+      ]);
+
+      expect(tokenABalance3).to.be.equal(tokenABalance2);
+      expect(tokenBBalance3).to.be.equal(
+        parseEther("5").mul(VOLATILE_SWAP_FEE).div(parseEther("1"))
+      );
+      expect(treasuryTokenABalance).to.be.equal(0);
+      expect(treasuryTokenBBalance).to.be.equal(0);
+    });
+
+    it("collects the right amount fees in the fees contract with the governor fee turned on", async () => {
+      const [feesContractAddress] = await Promise.all([
+        volatilePair.feesContract(),
+        factory.setFeeTo(treasury.address),
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("500")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("250")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      const [
+        tokenABalance,
+        tokenBBalance,
+        tokenATreasuryBalance,
+        tokenBTreasuryBalance,
+      ] = await Promise.all([
+        tokenA.balanceOf(feesContractAddress),
+        tokenB.balanceOf(feesContractAddress),
+        tokenA.balanceOf(treasury.address),
+        tokenB.balanceOf(treasury.address),
+      ]);
+
+      expect(tokenABalance).to.be.equal(0);
+      expect(tokenBBalance).to.be.equal(0);
+      expect(tokenATreasuryBalance).to.be.equal(0);
+      expect(tokenBTreasuryBalance).to.be.equal(0);
+
+      const amountOut = await volatilePair.getAmountOut(
+        tokenA.address,
+        parseEther("10")
+      );
+
+      await tokenA
+        .connect(alice)
+        .transfer(volatilePair.address, parseEther("10"));
+
+      const amount0Out = tokenA.address > tokenB.address ? amountOut : 0;
+      const amount1Out = tokenA.address > tokenB.address ? 0 : amountOut;
+
+      await volatilePair
+        .connect(alice)
+        .swap(amount0Out, amount1Out, alice.address, []);
+
+      const [
+        tokenABalance2,
+        tokenBBalance2,
+        tokenATreasuryBalance2,
+        tokenBTreasuryBalance2,
+      ] = await Promise.all([
+        tokenA.balanceOf(feesContractAddress),
+        tokenB.balanceOf(feesContractAddress),
+        tokenA.balanceOf(treasury.address),
+        tokenB.balanceOf(treasury.address),
+      ]);
+
+      expect(tokenABalance2).to.be.equal(
+        parseEther("10")
+          .mul(VOLATILE_SWAP_FEE)
+          .div(parseEther("1"))
+          .sub(
+            parseEther("10")
+              .mul(VOLATILE_SWAP_FEE)
+              .div(parseEther("1"))
+              .mul(GOVERNOR_FEE)
+              .div(parseEther("1"))
+          )
+      );
+      expect(tokenBBalance2).to.be.equal(0);
+      expect(tokenATreasuryBalance2).to.be.equal(
+        parseEther("10")
+          .mul(VOLATILE_SWAP_FEE)
+          .div(parseEther("1"))
+          .mul(GOVERNOR_FEE)
+          .div(parseEther("1"))
+      );
+      expect(tokenBTreasuryBalance2).to.be.equal(0);
+
+      const amountOut2 = await volatilePair.getAmountOut(
+        tokenB.address,
+        parseEther("5")
+      );
+
+      await tokenB
+        .connect(alice)
+        .transfer(volatilePair.address, parseEther("5"));
+
+      const amount0Out2 = tokenA.address > tokenB.address ? 0 : amountOut2;
+      const amount1Out2 = tokenA.address > tokenB.address ? amountOut2 : 0;
+
+      await volatilePair
+        .connect(alice)
+        .swap(amount0Out2, amount1Out2, alice.address, []);
+
+      const [
+        tokenABalance3,
+        tokenBBalance3,
+        treasuryTokenABalance,
+        treasuryTokenBBalance,
+      ] = await Promise.all([
+        tokenA.balanceOf(feesContractAddress),
+        tokenB.balanceOf(feesContractAddress),
+        tokenA.balanceOf(treasury.address),
+        tokenB.balanceOf(treasury.address),
+      ]);
+
+      expect(tokenABalance3).to.be.equal(tokenABalance2);
+      expect(tokenBBalance3).to.be.equal(
+        parseEther("5")
+          .mul(VOLATILE_SWAP_FEE)
+          .div(parseEther("1"))
+          .sub(
+            parseEther("5")
+              .mul(VOLATILE_SWAP_FEE)
+              .div(parseEther("1"))
+              .mul(GOVERNOR_FEE)
+              .div(parseEther("1"))
+          )
+      );
+      expect(treasuryTokenABalance).to.be.equal(tokenATreasuryBalance2);
+      expect(treasuryTokenBBalance).to.be.equal(
+        parseEther("5")
+          .mul(VOLATILE_SWAP_FEE)
+          .div(parseEther("1"))
+          .mul(GOVERNOR_FEE)
+          .div(parseEther("1"))
+      );
+    });
+  });
+
+  it("stable pairs use the stable swap invariant with lower slippages", async () => {
+    await Promise.all([
+      factory.createPair(tokenA.address, tokenC.address, false),
+      factory.createPair(tokenA.address, tokenC.address, true),
+      tokenC.mint(alice.address, parseTokenC("2000")),
+    ]);
+
+    const [volatilePairAddress, stablePairAddress] = await Promise.all([
+      factory.getPair(tokenA.address, tokenC.address, false),
+      factory.getPair(tokenA.address, tokenC.address, true),
+    ]);
+
+    const volatilePair = (await ethers.getContractFactory("Pair")).attach(
+      volatilePairAddress
+    ) as Pair;
+
+    const stablePair = (await ethers.getContractFactory("Pair")).attach(
+      stablePairAddress
+    ) as Pair;
+
+    await Promise.all([
+      tokenA.connect(alice).transfer(volatilePair.address, parseEther("500")),
+      tokenC.connect(alice).transfer(volatilePair.address, parseTokenC("500")),
+      tokenA.connect(alice).transfer(stablePair.address, parseEther("500")),
+      tokenC.connect(alice).transfer(stablePair.address, parseTokenC("500")),
+    ]);
+
+    await Promise.all([
+      volatilePair.mint(alice.address),
+      stablePair.mint(alice.address),
+    ]);
+
+    const [
+      vAmount1,
+      vAmount2,
+      vAmount3,
+      vAmount4,
+      vAmount5,
+      sAmount1,
+      sAmount2,
+      sAmount3,
+      sAmount4,
+      sAmount5,
+    ] = await Promise.all([
+      volatilePair.getAmountOut(tokenC.address, parseTokenC("1")),
+      volatilePair.getAmountOut(tokenC.address, parseTokenC("5")),
+      volatilePair.getAmountOut(tokenC.address, parseTokenC("10")),
+      volatilePair.getAmountOut(tokenC.address, parseTokenC("50")),
+      volatilePair.getAmountOut(tokenC.address, parseTokenC("300")),
+      stablePair.getAmountOut(tokenC.address, parseTokenC("1")),
+      stablePair.getAmountOut(tokenC.address, parseTokenC("5")),
+      stablePair.getAmountOut(tokenC.address, parseTokenC("10")),
+      stablePair.getAmountOut(tokenC.address, parseTokenC("50")),
+      stablePair.getAmountOut(tokenC.address, parseTokenC("300")),
+    ]);
+
+    // Stable swap always yields more tokens === less slippage
+    expect(sAmount1.gt(vAmount1)).to.be.equal(true);
+    expect(sAmount2.gt(vAmount2)).to.be.equal(true);
+    expect(sAmount3.gt(vAmount3)).to.be.equal(true);
+    expect(sAmount4.gt(vAmount4)).to.be.equal(true);
+    expect(sAmount5.gt(vAmount5)).to.be.equal(true);
+
+    await tokenC
+      .connect(alice)
+      .transfer(stablePair.address, parseTokenC("300"));
+
+    const amount0 = tokenA.address > tokenC.address ? 0 : sAmount5;
+    const amount1 = tokenA.address > tokenC.address ? sAmount5 : 0;
+
+    await expect(stablePair.swap(amount0, amount1, alice.address, []));
   });
 });

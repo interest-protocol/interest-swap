@@ -153,7 +153,7 @@ contract Pair is IERC20 {
         decimals0 = 10**_token0.safeDecimals();
         decimals1 = 10**_token1.safeDecimals();
 
-        // populate the array with empty observations
+        // populate the observations array with empty observations
         for (uint256 i = observations.length; i < GRANULARITY; i++) {
             observations.push();
         }
@@ -765,7 +765,7 @@ contract Pair is IERC20 {
             1e18;
     }
 
-    // Token from https://github.com/solidlyexchange/solidly/blob/master/contracts/BaseV1-core.sol
+    // Taken from https://github.com/solidlyexchange/solidly/blob/master/contracts/BaseV1-core.sol
     function _d(uint256 x0, uint256 y) private pure returns (uint256) {
         return
             (3 * x0 * ((y * y) / 1e18)) /
@@ -780,7 +780,7 @@ contract Pair is IERC20 {
         uint256 y
     ) private pure returns (uint256) {
         for (uint256 i = 0; i < 255; i++) {
-            uint256 prevY = y;
+            uint256 yPrev = y;
             uint256 k = _f(x0, y);
             if (k < xy) {
                 uint256 dy = ((xy - k) * 1e18) / _d(x0, y);
@@ -789,12 +789,12 @@ contract Pair is IERC20 {
                 uint256 dy = ((k - xy) * 1e18) / _d(x0, y);
                 y = y - dy;
             }
-            if (y > prevY) {
-                if (y - prevY <= 1) {
+            if (y > yPrev) {
+                if (y - yPrev <= 1) {
                     return y;
                 }
             } else {
-                if (prevY - y <= 1) {
+                if (yPrev - y <= 1) {
                     return y;
                 }
             }

@@ -9,7 +9,6 @@ import "./lib/Math.sol";
 import "./lib/Address.sol";
 
 import "./Fees.sol";
-import "hardhat/console.sol";
 
 struct Observation {
     uint256 timestamp;

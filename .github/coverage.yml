@@ -1,0 +1,28 @@
+name: Coverage
+on:
+  pull_request:
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v2  
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - run: npm ci
+        if: steps.cache.outputs.cache-hit != 'true'
+      - run: npm run clean
+      - run: npm run compile
+      - run: npm run coverage
+        env:
+          NODE_OPTIONS: --max_old_space_size=8192 
+          BSC_URL: ${{ secrets.BSC_URL }}
+      - uses: codecov/codecov-action@v2

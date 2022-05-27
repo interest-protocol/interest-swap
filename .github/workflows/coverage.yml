@@ -1,0 +1,25 @@
+name: Coverage
+on:
+  pull_request:
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v2
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-modules-${{ hashFiles('**/yarn.lock') }}
+      - run: yarn
+        if: steps.cache.outputs.cache-hit != 'true'
+      - run: yarn clean
+      - run: yarn compile
+      - run: yarn coverage
+        env:
+          NODE_OPTIONS: --max_old_space_size=8192 
+      - uses: codecov/codecov-action@v2

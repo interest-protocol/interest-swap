@@ -1415,15 +1415,19 @@ describe("Pair", () => {
       const [reserve0, reserve1, blocktimestampLast] =
         await volatilePair.getReserves();
 
-      const amount0 =
-        tokenA.address > tokenB.address
-          ? parseEther("500")
-          : parseEther("1000");
+      const token0 = await volatilePair.token0();
 
-      const amount1 =
-        tokenA.address > tokenB.address
+      const amount0 =
+        ethers.utils.getAddress(tokenA.address) ===
+        ethers.utils.getAddress(token0)
           ? parseEther("1000")
           : parseEther("500");
+
+      const amount1 =
+        ethers.utils.getAddress(tokenA.address) ===
+        ethers.utils.getAddress(token0)
+          ? parseEther("500")
+          : parseEther("1000");
 
       expect(reserve0).to.be.equal(amount0);
       expect(reserve1).to.be.equal(amount1);
@@ -1434,10 +1438,16 @@ describe("Pair", () => {
       ]);
 
       const additionalAmount0 =
-        tokenA.address > tokenB.address ? parseEther("70") : parseEther("20");
+        ethers.utils.getAddress(tokenA.address) ===
+        ethers.utils.getAddress(token0)
+          ? parseEther("20")
+          : parseEther("70");
 
       const additionalAmount1 =
-        tokenA.address > tokenB.address ? parseEther("20") : parseEther("70");
+        ethers.utils.getAddress(tokenA.address) ===
+        ethers.utils.getAddress(token0)
+          ? parseEther("70")
+          : parseEther("20");
 
       await volatilePair.sync();
 

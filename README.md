@@ -1,46 +1,49 @@
-# Advanced Sample Hardhat Project
+# :seedling: Welcome to Interest Protocol! :seedling:
 
-This project demonstrates an advanced Hardhat use case, integrating other tools commonly used alongside Hardhat in the ecosystem.
+[![codecov](https://codecov.io/gh/interest-protocol/interest-swap/branch/main/graph/badge.svg?token=FF611VO5MR)](https://codecov.io/gh/interest-protocol/interest-swap)
+[![docs](./assets/gitbook_2.svg)](https://docs.interestprotocol.com/)
+[![twitter](./assets/twitter.svg)](https://twitter.com/interest_dinero)
+[![discord](./assets/discord.svg)](https://discord.gg/PJEkqM4Crk)
+[![reddit](./assets/reddit.svg)](https://www.reddit.com/user/InterestProtocol)
 
-The project comes with a sample contract, a test for that contract, a sample script that deploys that contract, and an example of a task implementation, which simply lists the available accounts. It also comes with a variety of other tools, preconfigured to work with the project code.
+Interest Swap is a DEX that supports both the constant product and stable swap invariant.
 
-Try running some of the following tasks:
+## :money_with_wings: Features :money_with_wings:
 
-```shell
-npx hardhat accounts
-npx hardhat compile
-npx hardhat clean
-npx hardhat test
-npx hardhat node
-npx hardhat help
-REPORT_GAS=true npx hardhat test
-npx hardhat coverage
-npx hardhat run scripts/deploy.ts
-TS_NODE_FILES=true npx ts-node scripts/deploy.ts
-npx eslint '**/*.{js,ts}'
-npx eslint '**/*.{js,ts}' --fix
-npx prettier '**/*.{json,sol,md}' --check
-npx prettier '**/*.{json,sol,md}' --write
-npx solhint 'contracts/**/*.sol'
-npx solhint 'contracts/**/*.sol' --fix
-```
+- Swap Between stable and volatile pairs
+- Create volatile and stable pairs
+- Provide liquidity to pairs to earn fees
+- Router will automatically find best prices between stable and volatile pairs
+- Flash loans via hook function
 
-# Etherscan verification
+## :fire: Technology :fire:
 
-To try out Etherscan verification, you first need to deploy a contract to an Ethereum network that's supported by Etherscan, such as Ropsten.
+Core technologies:
 
-In this project, copy the .env.example file to a file named .env, and then edit it to fill in the details. Enter your Etherscan API key, your Ropsten node URL (eg from Alchemy), and the private key of the account which will send the deployment transaction. With a valid .env file in place, first deploy your contract:
+- [Typescript](https://www.typescriptlang.org/)
+- [Hardhat](https://hardhat.org/)
+- [Solidity](https://docs.soliditylang.org/)
 
-```shell
-hardhat run --network ropsten scripts/deploy.ts
-```
+> :warning: **If your node runs out of memory write in your terminal `export NODE_OPTIONS="--max-old-space-size=8192" `**
 
-Then, copy the deployment address and paste it in to replace `DEPLOYED_CONTRACT_ADDRESS` in this command:
+## Swap Formulas
 
-```shell
-npx hardhat verify --network ropsten DEPLOYED_CONTRACT_ADDRESS "Hello, Hardhat!"
-```
+- Stablep pairs follow the stableswap invarant - [x3y+y3x >= k](https://curve.fi/files/stableswap-paper.pdf)
+- Volatile pairs follow the constant product invariant - [x * y >= k](https://uniswap.org/whitepaper.pdf)
 
-# Performance optimizations
+## Credits
 
-For faster runs of your tests and scripts, consider skipping ts-node's type checking by setting the environment variable `TS_NODE_TRANSPILE_ONLY` to `1` in hardhat's environment. For more details see [the documentation](https://hardhat.org/guides/typescript.html#performance-optimizations).
+- Andre Cronje [solidly](https://github.com/solidlyexchange/solidly)
+- Uniswap [V2 Core](https://github.com/Uniswap/v2-core)
+- Curve [exchange](https://github.com/curvefi/curve-contract)
+
+## Social Media
+
+**Get in touch!**
+
+- info@interestprotocol.com
+- [Twitter](https://twitter.com/interest_dinero)
+- [Medium](https://medium.com/@interestprotocol)
+- [Reddit](https://www.reddit.com/user/InterestProtocol)
+- [Telegram](https://t.me/interestprotocol)
+- [Discord](https://discord.gg/PJEkqM4Crk)

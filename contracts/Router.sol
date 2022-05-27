@@ -11,6 +11,10 @@ import "./lib/Math.sol";
 struct Route {
     address from;
     address to;
+}
+
+struct Amount {
+    uint256 amount;
     bool stable;
 }
 
@@ -29,10 +33,15 @@ contract Router {
 
     modifier ensure(uint256 deadline) {
         //solhint-disable-next-line not-rely-on-time
-        require(deadline >= block.timestamp, "BaseV1Router: EXPIRED");
+        require(deadline >= block.timestamp, "Router: Expired");
         _;
     }
 
+    receive() external payable {
+        assert(msg.sender == address(WBNB)); // only accept BNB from the WBNB contract
+    }
+
+    // sorts tokens
     function sortTokens(address tokenA, address tokenB)
         public
         pure
@@ -68,15 +77,16 @@ contract Router {
         );
     }
 
-    // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
-    function quoteLiquidity(
-        uint256 amountA,
-        uint256 reserveA,
-        uint256 reserveB
-    ) private pure returns (uint256 amountB) {
-        require(amountA > 0, "Router: no 0 amountA");
-        require(reserveA > 0 && reserveB > 0, "Pair: not enough liquidity");
-        amountB = (amountA * reserveB) / reserveA;
+    // Fetches stable and volatile pair for two tokens
+    function getPairs(address tokenA, address tokenB)
+        public
+        view
+        returns (address volatilePair, address stablePair)
+    {
+        (volatilePair, stablePair) = (
+            pairFor(tokenA, tokenB, false),
+            pairFor(tokenA, tokenB, true)
+        );
     }
 
     // fetches and sorts the reserves for a pair
@@ -95,48 +105,48 @@ contract Router {
             : (reserve1, reserve0);
     }
 
-    // performs chained getAmountOut calculations on any number of pairs
+    // performs {_getBestAmount} in a pair
     function getAmountOut(
         uint256 amountIn,
         address tokenIn,
         address tokenOut
-    ) external view returns (uint256 amount, bool stable) {
-        address pair = pairFor(tokenIn, tokenOut, true);
-        uint256 amountStable;
-        uint256 amountVolatile;
-        if (IFactory(factory).isPair(pair)) {
-            amountStable = IPair(pair).getAmountOut(tokenIn, amountIn);
-        }
+    ) external view returns (Amount memory amount) {
+        (address volatilePair, address stablePair) = getPairs(
+            tokenIn,
+            tokenOut
+        );
 
-        pair = pairFor(tokenIn, tokenOut, false);
-        if (IFactory(factory).isPair(pair)) {
-            amountVolatile = IPair(pair).getAmountOut(tokenIn, amountIn);
-        }
-        return
-            amountStable > amountVolatile
-                ? (amountStable, true)
-                : (amountVolatile, false);
+        return _getBestAmount(tokenIn, amountIn, stablePair, volatilePair);
     }
 
-    // performs chained getAmountOut calculations on any number of pairs
-    function getAmountsOut(uint256 amountIn, Route[] memory routes)
+    // performs chained {_getBestAmount} calculations on any number of pairs
+    function getAmountsOut(uint256 amount, Route[] memory routes)
         public
         view
-        returns (uint256[] memory amounts)
+        returns (Amount[] memory amounts)
     {
-        require(routes.length >= 1, "BaseV1Router: INVALID_PATH");
-        amounts = new uint256[](routes.length + 1);
-        amounts[0] = amountIn;
+        require(routes.length > 0, "Router: invalid path");
+        require(amount > 0, "Router: no 0 amount");
+
+        amounts = new Amount[](routes.length + 1);
+
+        amounts[0] = Amount(amount, false);
+
         for (uint256 i = 0; i < routes.length; i++) {
-            address pair = pairFor(
+            (address volatilePair, address stablePair) = getPairs(
                 routes[i].from,
-                routes[i].to,
-                routes[i].stable
+                routes[i].to
             );
-            if (IFactory(factory).isPair(pair)) {
-                amounts[i + 1] = IPair(pair).getAmountOut(
+
+            if (
+                IFactory(factory).isPair(volatilePair) ||
+                IFactory(factory).isPair(stablePair)
+            ) {
+                amounts[i + 1] = _getBestAmount(
                     routes[i].from,
-                    amounts[i]
+                    amounts[i].amount,
+                    stablePair,
+                    volatilePair
                 );
             }
         }
@@ -161,8 +171,8 @@ contract Router {
             uint256 liquidity
         )
     {
-        // create the pair if it doesn't exist yet
         address _pair = IFactory(factory).getPair(tokenA, tokenB, stable);
+        // handle the case where pair does not exist
         (uint256 reserveA, uint256 reserveB) = (0, 0);
         uint256 _totalSupply = 0;
 
@@ -171,10 +181,18 @@ contract Router {
             (reserveA, reserveB) = getReserves(tokenA, tokenB, stable);
         }
         if (reserveA == 0 && reserveB == 0) {
-            (amountA, amountB) = (amountADesired, amountBDesired);
-            liquidity = Math.sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
+            uint256 minAmount = Math.min(amountADesired, amountBDesired);
+
+            (amountA, amountB) = (
+                stable ? minAmount : amountADesired,
+                stable ? minAmount : amountBDesired
+            );
+
+            liquidity = stable
+                ? Math.sqrt(minAmount * minAmount) - MINIMUM_LIQUIDITY
+                : Math.sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
         } else {
-            uint256 amountBOptimal = quoteLiquidity(
+            uint256 amountBOptimal = _quoteLiquidity(
                 amountADesired,
                 reserveA,
                 reserveB
@@ -187,7 +205,7 @@ contract Router {
                     (amountB * _totalSupply) / reserveB
                 );
             } else {
-                uint256 amountAOptimal = quoteLiquidity(
+                uint256 amountAOptimal = _quoteLiquidity(
                     amountBDesired,
                     reserveB,
                     reserveA
@@ -207,9 +225,9 @@ contract Router {
         bool stable,
         uint256 liquidity
     ) external view returns (uint256 amountA, uint256 amountB) {
-        // create the pair if it doesn't exist yet
         address _pair = IFactory(factory).getPair(tokenA, tokenB, stable);
 
+        // Cannot remove liquidity if the pair does not exist
         if (_pair == address(0)) {
             return (0, 0);
         }
@@ -221,59 +239,9 @@ contract Router {
         );
         uint256 _totalSupply = IERC20(_pair).totalSupply();
 
+        // If  you pass a liquidity > total supply it will return wrong value.
         amountA = (liquidity * reserveA) / _totalSupply; // using balances ensures pro-rata distribution
         amountB = (liquidity * reserveB) / _totalSupply; // using balances ensures pro-rata distribution
-    }
-
-    function _addLiquidity(
-        address tokenA,
-        address tokenB,
-        bool stable,
-        uint256 amountADesired,
-        uint256 amountBDesired,
-        uint256 amountAMin,
-        uint256 amountBMin
-    ) private returns (uint256 amountA, uint256 amountB) {
-        assert(amountADesired >= amountAMin);
-        assert(amountBDesired >= amountBMin);
-        // create the pair if it doesn't exist yet
-        address _pair = IFactory(factory).getPair(tokenA, tokenB, stable);
-        if (_pair == address(0)) {
-            _pair = IFactory(factory).createPair(tokenA, tokenB, stable);
-        }
-        (uint256 reserveA, uint256 reserveB) = getReserves(
-            tokenA,
-            tokenB,
-            stable
-        );
-        if (reserveA == 0 && reserveB == 0) {
-            (amountA, amountB) = (amountADesired, amountBDesired);
-        } else {
-            uint256 amountBOptimal = quoteLiquidity(
-                amountADesired,
-                reserveA,
-                reserveB
-            );
-            if (amountBOptimal <= amountBDesired) {
-                require(
-                    amountBOptimal >= amountBMin,
-                    "Router: Insufficient amountB"
-                );
-                (amountA, amountB) = (amountADesired, amountBOptimal);
-            } else {
-                uint256 amountAOptimal = quoteLiquidity(
-                    amountBDesired,
-                    reserveB,
-                    reserveA
-                );
-                assert(amountAOptimal <= amountADesired);
-                require(
-                    amountAOptimal >= amountAMin,
-                    "Router: Insufficient amountA"
-                );
-                (amountA, amountB) = (amountAOptimal, amountBDesired);
-            }
-        }
     }
 
     function addLiquidity(
@@ -315,7 +283,7 @@ contract Router {
         bool stable,
         uint256 amountTokenDesired,
         uint256 amountTokenMin,
-        uint256 amountFTMMin,
+        uint256 amountBNBMin,
         address to,
         uint256 deadline
     )
@@ -335,24 +303,19 @@ contract Router {
             amountTokenDesired,
             msg.value,
             amountTokenMin,
-            amountFTMMin
+            amountBNBMin
         );
         address pair = pairFor(token, address(WBNB), stable);
         _safeTransferFrom(token, msg.sender, pair, amountToken);
 
         WBNB.deposit{value: amountWBNB}();
         assert(WBNB.transfer(pair, amountWBNB));
+
         liquidity = IPair(pair).mint(to);
 
         // refund dust eth, if any
         if (msg.value > amountWBNB)
             _safeTransferBNB(msg.sender, msg.value - amountWBNB);
-    }
-
-    function _safeTransferBNB(address to, uint256 value) private {
-        //solhint-disable-next-line avoid-low-level-calls
-        (bool success, ) = to.call{value: value}("");
-        require(success, "Router: BNB transfer failed");
     }
 
     function removeLiquidity(
@@ -366,7 +329,8 @@ contract Router {
         uint256 deadline
     ) public ensure(deadline) returns (uint256 amountA, uint256 amountB) {
         address pair = pairFor(tokenA, tokenB, stable);
-        assert(IPair(pair).transferFrom(msg.sender, pair, liquidity)); // send liquidity to pair
+
+        _safeTransferFrom(pair, msg.sender, pair, liquidity); // send liquidity to pair
 
         (uint256 amount0, uint256 amount1) = IPair(pair).burn(to);
         (address token0, ) = sortTokens(tokenA, tokenB);
@@ -382,23 +346,23 @@ contract Router {
         bool stable,
         uint256 liquidity,
         uint256 amountTokenMin,
-        uint256 amountFTMMin,
+        uint256 amountBNBMin,
         address to,
         uint256 deadline
-    ) public ensure(deadline) returns (uint256 amountToken, uint256 amountFTM) {
-        (amountToken, amountFTM) = removeLiquidity(
+    ) public ensure(deadline) returns (uint256 amountToken, uint256 amountBNB) {
+        (amountToken, amountBNB) = removeLiquidity(
             token,
             address(WBNB),
             stable,
             liquidity,
             amountTokenMin,
-            amountFTMMin,
+            amountBNBMin,
             address(this),
             deadline
         );
         _safeTransfer(token, to, amountToken);
-        WBNB.withdraw(amountFTM);
-        _safeTransferBNB(to, amountFTM);
+        WBNB.withdraw(amountBNB);
+        _safeTransferBNB(to, amountBNB);
     }
 
     function removeLiquidityWithPermit(
@@ -416,18 +380,16 @@ contract Router {
         bytes32 s
     ) external returns (uint256 amountA, uint256 amountB) {
         address pair = pairFor(tokenA, tokenB, stable);
-        {
-            uint256 value = approveMax ? type(uint256).max : liquidity;
-            IPair(pair).permit(
-                msg.sender,
-                address(this),
-                value,
-                deadline,
-                v,
-                r,
-                s
-            );
-        }
+
+        IPair(pair).permit(
+            msg.sender,
+            address(this),
+            approveMax ? type(uint256).max : liquidity,
+            deadline,
+            v,
+            r,
+            s
+        );
 
         (amountA, amountB) = removeLiquidity(
             tokenA,
@@ -446,23 +408,32 @@ contract Router {
         bool stable,
         uint256 liquidity,
         uint256 amountTokenMin,
-        uint256 amountFTMMin,
+        uint256 amountBNBMin,
         address to,
         uint256 deadline,
         bool approveMax,
         uint8 v,
         bytes32 r,
         bytes32 s
-    ) external returns (uint256 amountToken, uint256 amountFTM) {
+    ) external returns (uint256 amountToken, uint256 amountBNB) {
         address pair = pairFor(token, address(WBNB), stable);
-        uint256 value = approveMax ? type(uint256).max : liquidity;
-        IPair(pair).permit(msg.sender, address(this), value, deadline, v, r, s);
-        (amountToken, amountFTM) = removeLiquidityBNB(
+
+        IPair(pair).permit(
+            msg.sender,
+            address(this),
+            approveMax ? type(uint256).max : liquidity,
+            deadline,
+            v,
+            r,
+            s
+        );
+
+        (amountToken, amountBNB) = removeLiquidityBNB(
             token,
             stable,
             liquidity,
             amountTokenMin,
-            amountFTMMin,
+            amountBNBMin,
             to,
             deadline
         );
@@ -474,17 +445,17 @@ contract Router {
         Route[] calldata routes,
         address to,
         uint256 deadline
-    ) external ensure(deadline) returns (uint256[] memory amounts) {
+    ) external ensure(deadline) returns (Amount[] memory amounts) {
         amounts = getAmountsOut(amountIn, routes);
         require(
-            amounts[amounts.length - 1] >= amountOutMin,
+            amounts[amounts.length - 1].amount >= amountOutMin,
             "Router: Insufficient output"
         );
         _safeTransferFrom(
             routes[0].from,
             msg.sender,
-            pairFor(routes[0].from, routes[0].to, routes[0].stable),
-            amounts[0]
+            pairFor(routes[0].from, routes[0].to, amounts[1].stable),
+            amountIn
         );
         _swap(amounts, routes, to);
     }
@@ -494,18 +465,19 @@ contract Router {
         Route[] calldata routes,
         address to,
         uint256 deadline
-    ) external payable ensure(deadline) returns (uint256[] memory amounts) {
+    ) external payable ensure(deadline) returns (Amount[] memory amounts) {
         require(routes[0].from == address(WBNB), "Router: wrong route");
         amounts = getAmountsOut(msg.value, routes);
         require(
-            amounts[amounts.length - 1] >= amountOutMin,
+            amounts[amounts.length - 1].amount >= amountOutMin,
             "Router: Insufficient output"
         );
-        WBNB.deposit{value: amounts[0]}();
+
+        WBNB.deposit{value: msg.value}();
         assert(
             WBNB.transfer(
-                pairFor(routes[0].from, routes[0].to, routes[0].stable),
-                amounts[0]
+                pairFor(routes[0].from, routes[0].to, amounts[1].stable),
+                msg.value
             )
         );
         _swap(amounts, routes, to);
@@ -517,54 +489,80 @@ contract Router {
         Route[] calldata routes,
         address to,
         uint256 deadline
-    ) external ensure(deadline) returns (uint256[] memory amounts) {
+    ) external ensure(deadline) returns (Amount[] memory amounts) {
         require(
             routes[routes.length - 1].to == address(WBNB),
             "Router: wrong route"
         );
         amounts = getAmountsOut(amountIn, routes);
         require(
-            amounts[amounts.length - 1] >= amountOutMin,
+            amounts[amounts.length - 1].amount >= amountOutMin,
             "Router: Insufficient output"
         );
         _safeTransferFrom(
             routes[0].from,
             msg.sender,
-            pairFor(routes[0].from, routes[0].to, routes[0].stable),
-            amounts[0]
+            pairFor(routes[0].from, routes[0].to, amounts[1].stable),
+            amountIn
         );
         _swap(amounts, routes, address(this));
-        WBNB.withdraw(amounts[amounts.length - 1]);
-        _safeTransferBNB(to, amounts[amounts.length - 1]);
+        WBNB.withdraw(amounts[amounts.length - 1].amount);
+        _safeTransferBNB(to, amounts[amounts.length - 1].amount);
     }
 
     // **** SWAP ****
     // requires the initial amount to have already been sent to the first pair
     function _swap(
-        uint256[] memory amounts,
+        Amount[] memory amounts,
         Route[] memory routes,
         address _to
     ) private {
         for (uint256 i = 0; i < routes.length; i++) {
             (address token0, ) = sortTokens(routes[i].from, routes[i].to);
-            uint256 amountOut = amounts[i + 1];
+
+            uint256 amountOut = amounts[i + 1].amount;
+
             (uint256 amount0Out, uint256 amount1Out) = routes[i].from == token0
                 ? (uint256(0), amountOut)
                 : (amountOut, uint256(0));
+
             address to = i < routes.length - 1
                 ? pairFor(
                     routes[i + 1].from,
                     routes[i + 1].to,
-                    routes[i + 1].stable
+                    amounts[i + 2].stable
                 )
                 : _to;
-            IPair(pairFor(routes[i].from, routes[i].to, routes[i].stable)).swap(
-                    amount0Out,
-                    amount1Out,
-                    to,
-                    ""
-                );
+
+            IPair(pairFor(routes[i].from, routes[i].to, amounts[i + 1].stable))
+                .swap(amount0Out, amount1Out, to, "");
         }
+    }
+
+    function _getBestAmount(
+        address tokenIn,
+        uint256 amountIn,
+        address stablePair,
+        address volatilePair
+    ) private view returns (Amount memory) {
+        uint256 amountStable;
+        uint256 amountVolatile;
+
+        if (IFactory(factory).isPair(stablePair)) {
+            amountStable = IPair(stablePair).getAmountOut(tokenIn, amountIn);
+        }
+
+        if (IFactory(factory).isPair(volatilePair)) {
+            amountVolatile = IPair(volatilePair).getAmountOut(
+                tokenIn,
+                amountIn
+            );
+        }
+
+        return
+            amountStable > amountVolatile
+                ? Amount(amountStable, true)
+                : Amount(amountVolatile, false);
     }
 
     function _safeTransfer(
@@ -603,5 +601,77 @@ contract Router {
             success && (data.length == 0 || abi.decode(data, (bool))),
             "Router: Failed to transferFrom"
         );
+    }
+
+    function _safeTransferBNB(address to, uint256 value) private {
+        //solhint-disable-next-line avoid-low-level-calls
+        (bool success, ) = to.call{value: value}("");
+        require(success, "Router: BNB transfer failed");
+    }
+
+    // given some amount of an asset and pair reserves, returns the optimal amount of reserves to add for the token asset
+    function _quoteLiquidity(
+        uint256 amountA,
+        uint256 reserveA,
+        uint256 reserveB
+    ) private pure returns (uint256 amountB) {
+        require(amountA > 0, "Router: no 0 amountA");
+        require(reserveA > 0 && reserveB > 0, "Router: not enough liquidity");
+        amountB = (amountA * reserveB) / reserveA;
+    }
+
+    function _addLiquidity(
+        address tokenA,
+        address tokenB,
+        bool stable,
+        uint256 amountADesired,
+        uint256 amountBDesired,
+        uint256 amountAMin,
+        uint256 amountBMin
+    ) private returns (uint256 amountA, uint256 amountB) {
+        require(amountADesired >= amountAMin, "Router: wrong a amounts");
+        require(amountBDesired >= amountBMin, "Router: wrong b amounts");
+
+        // create the pair if it doesn't exist yet
+        address _pair = IFactory(factory).getPair(tokenA, tokenB, stable);
+        if (_pair == address(0)) {
+            _pair = IFactory(factory).createPair(tokenA, tokenB, stable);
+        }
+        (uint256 reserveA, uint256 reserveB) = getReserves(
+            tokenA,
+            tokenB,
+            stable
+        );
+        if (reserveA == 0 && reserveB == 0) {
+            uint256 minAmount = Math.min(amountADesired, amountBDesired);
+            (amountA, amountB) = stable
+                ? (minAmount, minAmount)
+                : (amountADesired, amountBDesired);
+        } else {
+            uint256 amountBOptimal = _quoteLiquidity(
+                amountADesired,
+                reserveA,
+                reserveB
+            );
+            if (amountBOptimal <= amountBDesired) {
+                require(
+                    amountBOptimal >= amountBMin,
+                    "Router: Insufficient amountB"
+                );
+                (amountA, amountB) = (amountADesired, amountBOptimal);
+            } else {
+                uint256 amountAOptimal = _quoteLiquidity(
+                    amountBDesired,
+                    reserveB,
+                    reserveA
+                );
+                assert(amountAOptimal <= amountADesired);
+                require(
+                    amountAOptimal >= amountAMin,
+                    "Router: Insufficient amountA"
+                );
+                (amountA, amountB) = (amountAOptimal, amountBDesired);
+            }
+        }
     }
 }

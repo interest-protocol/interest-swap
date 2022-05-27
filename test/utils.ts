@@ -142,3 +142,13 @@ export function sqrt(value: BigNumber) {
 }
 
 export const min = (x: BigNumber, y: BigNumber) => (x.gt(y) ? y : x);
+
+export const quoteLiquidity = (
+  amountA: BigNumber,
+  reserveA: BigNumber,
+  reserveB: BigNumber
+) => {
+  if (reserveA.isZero()) return BigNumber.from(0);
+
+  return amountA.mul(reserveB).div(reserveA);
+};

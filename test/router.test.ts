@@ -1336,4 +1336,363 @@ describe("Router", () => {
       );
     });
   });
+
+  describe("function: swapExactTokensForTokens", () => {
+    it("reverts it is past the deadline", async () => {
+      await expect(
+        router.swapExactTokensForTokens(0, 0, [], alice.address, 0)
+      ).to.revertedWith("Router: Expired");
+    });
+
+    it("reverts if the min out is higher than possible amount", async () => {
+      await Promise.all([
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("890")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("450")),
+      ]);
+
+      await volatilePair.mint(alice.address);
+
+      const firstSwapOutput = await volatilePair.getAmountOut(
+        tokenA.address,
+        parseEther("3")
+      );
+
+      await expect(
+        router.swapExactTokensForTokens(
+          parseEther("3"),
+          firstSwapOutput.add(parseEther("0.1")),
+          [{ from: tokenA.address, to: tokenB.address }],
+          alice.address,
+          ethers.constants.MaxUint256
+        )
+      ).to.revertedWith("Router: Insufficient output");
+    });
+
+    it("swaps between the best possible price", async () => {
+      const [pairFactory] = await Promise.all([
+        ethers.getContractFactory("Pair"),
+        factory.createPair(wbnb.address, tokenA.address, false),
+        factory.createPair(wbnb.address, tokenB.address, false),
+        factory.createPair(wbnb.address, tokenB.address, true),
+        wbnb.connect(alice).deposit({ value: parseEther("30") }),
+      ]);
+
+      const [vwbnbTokenAAddress, vwbnbTokenBAddress, swbnbTokenBAddress] =
+        await Promise.all([
+          factory.getPair(wbnb.address, tokenA.address, false),
+          factory.getPair(wbnb.address, tokenB.address, false),
+          factory.getPair(wbnb.address, tokenB.address, true),
+        ]);
+
+      const [vwbnbTokenA, vwbnbTokenB, swbnbTokenB] = [
+        pairFactory.attach(vwbnbTokenAAddress),
+        pairFactory.attach(vwbnbTokenBAddress),
+        pairFactory.attach(swbnbTokenBAddress),
+      ];
+
+      await Promise.all([
+        wbnb.connect(alice).transfer(vwbnbTokenAAddress, parseEther("10")),
+        tokenA.connect(alice).transfer(vwbnbTokenAAddress, parseEther("25")),
+        wbnb.connect(alice).transfer(vwbnbTokenBAddress, parseEther("10")),
+        tokenB.connect(alice).transfer(vwbnbTokenBAddress, parseEther("6")),
+        wbnb.connect(alice).transfer(swbnbTokenBAddress, parseEther("10")),
+        tokenB.connect(alice).transfer(swbnbTokenBAddress, parseEther("10")),
+      ]);
+
+      await Promise.all([
+        vwbnbTokenA.mint(alice.address),
+        vwbnbTokenB.mint(alice.address),
+        swbnbTokenB.mint(alice.address),
+      ]);
+
+      const firstSwapOutput = await vwbnbTokenA.getAmountOut(
+        tokenA.address,
+        parseEther("2")
+      );
+
+      const secondSwapOutput = await swbnbTokenB.getAmountOut(
+        wbnb.address,
+        firstSwapOutput
+      );
+
+      await expect(
+        router.connect(alice).swapExactTokensForTokens(
+          parseEther("2"),
+          secondSwapOutput.sub(parseEther("0.1")),
+          [
+            { from: tokenA.address, to: wbnb.address },
+            { from: wbnb.address, to: tokenB.address },
+          ],
+          alice.address,
+          ethers.constants.MaxUint256
+        )
+      )
+        .to.emit(tokenB, "Transfer")
+        .withArgs(swbnbTokenB.address, alice.address, secondSwapOutput);
+    });
+  });
+
+  describe("function: swapExactBNBForTokens", () => {
+    it("reverts if  the deadline has passed", async () => {
+      await expect(
+        router.swapExactBNBForTokens(0, [], alice.address, 0)
+      ).to.revertedWith("Router: Expired");
+    });
+
+    it("reverts if first from is not WBNB", async () => {
+      await expect(
+        router.swapExactBNBForTokens(
+          0,
+          [{ from: tokenA.address, to: wbnb.address }],
+          alice.address,
+          ethers.constants.MaxUint256
+        )
+      ).to.revertedWith("Router: wrong route");
+    });
+
+    it("finds best price", async () => {
+      const [pairFactory] = await Promise.all([
+        ethers.getContractFactory("Pair"),
+        factory.createPair(wbnb.address, tokenA.address, false),
+        factory.createPair(wbnb.address, tokenA.address, true),
+        wbnb.connect(alice).deposit({ value: parseEther("50") }),
+      ]);
+
+      const [vwbnbTokenAAddress, swbnbTokenAAddress] = await Promise.all([
+        factory.getPair(wbnb.address, tokenA.address, false),
+        factory.getPair(wbnb.address, tokenA.address, true),
+      ]);
+
+      const [vwbnbTokenA, swbnbTokenA] = [
+        pairFactory.attach(vwbnbTokenAAddress),
+        pairFactory.attach(swbnbTokenAAddress),
+      ];
+
+      await Promise.all([
+        wbnb.connect(alice).transfer(vwbnbTokenAAddress, parseEther("20")),
+        tokenA.connect(alice).transfer(vwbnbTokenAAddress, parseEther("50")),
+        wbnb.connect(alice).transfer(swbnbTokenAAddress, parseEther("25")),
+        tokenA.connect(alice).transfer(swbnbTokenAAddress, parseEther("25")),
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("25")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("50")),
+      ]);
+
+      await Promise.all([
+        vwbnbTokenA.mint(alice.address),
+        volatilePair.mint(alice.address),
+        swbnbTokenA.mint(alice.address),
+      ]);
+
+      const firstSwapOutput = await vwbnbTokenA.getAmountOut(
+        wbnb.address,
+        parseEther("2")
+      );
+
+      const secondSwapOutput = await volatilePair.getAmountOut(
+        tokenA.address,
+        firstSwapOutput
+      );
+
+      await expect(
+        router.connect(alice).swapExactBNBForTokens(
+          secondSwapOutput,
+          [
+            { from: wbnb.address, to: tokenA.address },
+            { from: tokenA.address, to: tokenB.address },
+          ],
+          alice.address,
+          ethers.constants.MaxUint256,
+          { value: parseEther("2") }
+        )
+      )
+        .to.emit(tokenB, "Transfer")
+        .withArgs(volatilePair.address, alice.address, secondSwapOutput);
+    });
+
+    it("reverts if the trade incurs too much slippage", async () => {
+      const [pairFactory] = await Promise.all([
+        ethers.getContractFactory("Pair"),
+        factory.createPair(wbnb.address, tokenA.address, false),
+        wbnb.connect(alice).deposit({ value: parseEther("30") }),
+      ]);
+
+      const vwbnbTokenAAddress = await factory.getPair(
+        wbnb.address,
+        tokenA.address,
+        false
+      );
+
+      const vwbnbTokenA = pairFactory.attach(vwbnbTokenAAddress);
+
+      await Promise.all([
+        wbnb.connect(alice).transfer(vwbnbTokenAAddress, parseEther("10")),
+        tokenA.connect(alice).transfer(vwbnbTokenAAddress, parseEther("25")),
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("25")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("50")),
+      ]);
+
+      await Promise.all([
+        vwbnbTokenA.mint(alice.address),
+        volatilePair.mint(alice.address),
+      ]);
+
+      const firstSwapOutput = await vwbnbTokenA.getAmountOut(
+        wbnb.address,
+        parseEther("2")
+      );
+
+      const secondSwapOutput = await volatilePair.getAmountOut(
+        tokenA.address,
+        firstSwapOutput
+      );
+
+      await expect(
+        router.connect(alice).swapExactBNBForTokens(
+          secondSwapOutput.add(parseEther("0.1")),
+          [
+            { from: wbnb.address, to: tokenA.address },
+            { from: tokenA.address, to: tokenB.address },
+          ],
+          alice.address,
+          ethers.constants.MaxUint256,
+          { value: parseEther("2") }
+        )
+      ).to.revertedWith("Router: Insufficient output");
+    });
+  });
+
+  describe("function: swapExactTokensForBNB", () => {
+    it("reverts if  the deadline has passed", async () => {
+      await expect(
+        router.swapExactTokensForBNB(0, 0, [], alice.address, 0)
+      ).to.revertedWith("Router: Expired");
+    });
+
+    it("reverts if the route does not end in WBNB", async () => {
+      await expect(
+        router.swapExactTokensForBNB(
+          0,
+          0,
+          [{ from: wbnb.address, to: tokenA.address }],
+          alice.address,
+          ethers.constants.MaxUint256
+        )
+      ).to.revertedWith("Router: wrong route");
+    });
+
+    it("reverts if it incurs too much slippage", async () => {
+      const [pairFactory] = await Promise.all([
+        ethers.getContractFactory("Pair"),
+        factory.createPair(wbnb.address, tokenA.address, false),
+        wbnb.connect(alice).deposit({ value: parseEther("30") }),
+      ]);
+
+      const vwbnbTokenAAddress = await factory.getPair(
+        wbnb.address,
+        tokenA.address,
+        false
+      );
+
+      const vwbnbTokenA = pairFactory.attach(vwbnbTokenAAddress);
+
+      await Promise.all([
+        wbnb.connect(alice).transfer(vwbnbTokenAAddress, parseEther("10")),
+        tokenA.connect(alice).transfer(vwbnbTokenAAddress, parseEther("25")),
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("25")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("50")),
+      ]);
+
+      await Promise.all([
+        vwbnbTokenA.mint(alice.address),
+        volatilePair.mint(alice.address),
+      ]);
+
+      const firstSwapOutput = await volatilePair.getAmountOut(
+        tokenB.address,
+        parseEther("2")
+      );
+
+      const secondSwapOutput = await vwbnbTokenA.getAmountOut(
+        tokenA.address,
+        firstSwapOutput
+      );
+
+      await expect(
+        router.connect(alice).swapExactTokensForBNB(
+          parseEther("2"),
+          secondSwapOutput.add(parseEther("0.1")),
+          [
+            { from: tokenB.address, to: tokenA.address },
+            { from: tokenA.address, to: wbnb.address },
+          ],
+          alice.address,
+          ethers.constants.MaxUint256
+        )
+      ).to.revertedWith("Router: Insufficient output");
+    });
+
+    it("finds best price", async () => {
+      const [pairFactory] = await Promise.all([
+        ethers.getContractFactory("Pair"),
+        factory.createPair(wbnb.address, tokenA.address, false),
+        factory.createPair(wbnb.address, tokenA.address, true),
+        wbnb.connect(alice).deposit({ value: parseEther("50") }),
+      ]);
+
+      const [vwbnbTokenAAddress, swbnbTokenAAddress] = await Promise.all([
+        factory.getPair(wbnb.address, tokenA.address, false),
+        factory.getPair(wbnb.address, tokenA.address, true),
+      ]);
+
+      const [vwbnbTokenA, swbnbTokenA] = [
+        pairFactory.attach(vwbnbTokenAAddress),
+        pairFactory.attach(swbnbTokenAAddress),
+      ];
+
+      await Promise.all([
+        wbnb.connect(alice).transfer(vwbnbTokenAAddress, parseEther("20")),
+        tokenA.connect(alice).transfer(vwbnbTokenAAddress, parseEther("50")),
+        wbnb.connect(alice).transfer(swbnbTokenAAddress, parseEther("25")),
+        tokenA.connect(alice).transfer(swbnbTokenAAddress, parseEther("25")),
+        tokenA.connect(alice).transfer(volatilePair.address, parseEther("25")),
+        tokenB.connect(alice).transfer(volatilePair.address, parseEther("50")),
+      ]);
+
+      await Promise.all([
+        vwbnbTokenA.mint(alice.address),
+        volatilePair.mint(alice.address),
+        swbnbTokenA.mint(alice.address),
+      ]);
+
+      const firstSwapOutput = await volatilePair.getAmountOut(
+        tokenB.address,
+        parseEther("2")
+      );
+
+      const secondSwapOutput = await swbnbTokenA.getAmountOut(
+        tokenA.address,
+        firstSwapOutput
+      );
+
+      const aliceBalance = await alice.getBalance();
+
+      await expect(
+        router.connect(alice).swapExactTokensForBNB(
+          parseEther("2"),
+          secondSwapOutput,
+          [
+            { from: tokenB.address, to: tokenA.address },
+            { from: tokenA.address, to: wbnb.address },
+          ],
+          alice.address,
+          ethers.constants.MaxUint256
+        )
+      ).to.not.reverted;
+
+      expect(await alice.getBalance()).to.be.closeTo(
+        aliceBalance.add(secondSwapOutput),
+        parseEther("0.1") // fees
+      );
+    });
+  });
 });

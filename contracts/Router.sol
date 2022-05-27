@@ -7,7 +7,6 @@ import "./interfaces/IPair.sol";
 import "./interfaces/IERC20.sol";
 
 import "./lib/Math.sol";
-import "hardhat/console.sol";
 
 struct Route {
     address from;
@@ -473,6 +472,7 @@ contract Router {
             amounts[amounts.length - 1].amount >= amountOutMin,
             "Router: Insufficient output"
         );
+
         WBNB.deposit{value: msg.value}();
         assert(
             WBNB.transfer(
@@ -530,7 +530,7 @@ contract Router {
                 ? pairFor(
                     routes[i + 1].from,
                     routes[i + 1].to,
-                    amounts[i + 1].stable
+                    amounts[i + 2].stable
                 )
                 : _to;
 

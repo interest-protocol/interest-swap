@@ -11,17 +11,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/cache@v2  
+      - uses: actions/cache@v2
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
-      - run: npm ci
+          path: '**/node_modules'
+          key: ${{ runner.os }}-modules-${{ hashFiles('**/yarn.lock') }}
+      - run: yarn
         if: steps.cache.outputs.cache-hit != 'true'
-      - run: npm run clean
-      - run: npm run compile
-      - run: npm run coverage
+      - run: yarn clean
+      - run: yarn compile
+      - run: yarn coverage
         env:
           NODE_OPTIONS: --max_old_space_size=8192 
       - uses: codecov/codecov-action@v2

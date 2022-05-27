@@ -24,5 +24,4 @@ jobs:
       - run: npm run coverage
         env:
           NODE_OPTIONS: --max_old_space_size=8192 
-          BSC_URL: ${{ secrets.BSC_URL }}
       - uses: codecov/codecov-action@v2

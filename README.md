@@ -27,8 +27,8 @@ Core technologies:
 
 ## Swap Formulas
 
-- [Stablep pairs follow the stableswap invarant - x3y+y3x >= k](https://curve.fi/files/stableswap-paper.pdf)
-- [Volatile pairs follow the constant product invariant - x * y >= k](https://uniswap.org/whitepaper.pdf)
+- Stablep pairs follow the stableswap invarant - [x3y+y3x >= k](https://curve.fi/files/stableswap-paper.pdf)
+- Volatile pairs follow the constant product invariant - [x * y >= k](https://uniswap.org/whitepaper.pdf)
 
 ## Credits
 

@@ -1447,15 +1447,22 @@ describe("Pair", () => {
         volatilePair.reserve1CumulativeLast(),
       ]);
 
-      const reserve0 =
-        tokenA.address > tokenB.address
-          ? parseEther("500")
-          : parseEther("1000");
+      const helper = (await deploy("Helper")) as Helper;
 
-      const reserve1 =
-        tokenA.address > tokenB.address
+      const [token0Address] = await helper.sortTokens(
+        tokenA.address,
+        tokenB.address
+      );
+
+      const reserve0 =
+        tokenA.address === token0Address
           ? parseEther("1000")
           : parseEther("500");
+
+      const reserve1 =
+        tokenA.address === token0Address
+          ? parseEther("500")
+          : parseEther("1000");
 
       expect(reserveCumulativeTwo0).to.be.equal(
         reserveCumulative0.add(reserve0.mul(27))

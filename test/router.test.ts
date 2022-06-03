@@ -131,12 +131,11 @@ describe("Router", () => {
         tokenB.address
       );
 
-      expect(token0).to.be.equal(
-        tokenA.address > tokenB.address ? tokenB.address : tokenA.address
-      );
-      expect(token1).to.be.equal(
-        tokenA.address > tokenB.address ? tokenA.address : tokenB.address
-      );
+      const pairToken0 = await volatilePair.token0();
+      const pairToken1 = await volatilePair.token1();
+
+      expect(token0).to.be.equal(pairToken0);
+      expect(token1).to.be.equal(pairToken1);
     });
   });
 

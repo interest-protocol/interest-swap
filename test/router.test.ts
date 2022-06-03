@@ -288,6 +288,18 @@ describe("Router", () => {
       ]);
     });
 
+    it("returns first amount if the pair does not exist", async () => {
+      const amounts = await router.getAmountsOut(parseEther("10"), [
+        { from: alice.address, to: tokenA.address },
+      ]);
+
+      expect(amounts.length).to.be.equal(2);
+      expect(amounts[0].amount).to.be.equal(parseEther("10"));
+      expect(amounts[0].stable).to.be.equal(false);
+      expect(amounts[1].amount).to.be.equal(0);
+      expect(amounts[1].stable).to.be.equal(false);
+    });
+
     it("returns the best price on a specific route", async () => {
       await Promise.all([
         factory.createPair(tokenB.address, tokenC.address, false),
@@ -368,6 +380,11 @@ describe("Router", () => {
     });
   });
 
+  it("checks if it is a pair", async () => {
+    expect(await router.isPair(volatilePair.address)).to.be.equal(true);
+    expect(await router.isPair(alice.address)).to.be.equal(false);
+  });
+
   describe("function: quoteAddLiquidity", () => {
     it("handles the case when there is no pair", async () => {
       const [
@@ -401,6 +418,24 @@ describe("Router", () => {
       expect(sLiquidity).to.be.equal(
         sqrt(parseEther("300").mul(parseEther("300"))).sub(MINIMUM_LIQUIDITY)
       );
+    });
+
+    it("reverts if the reserves are not balanced", async () => {
+      await tokenA
+        .connect(alice)
+        .transfer(volatilePair.address, parseEther("1000"));
+
+      await volatilePair.sync();
+
+      await expect(
+        router.quoteAddLiquidity(
+          tokenA.address,
+          tokenB.address,
+          false,
+          parseEther("1"),
+          0
+        )
+      ).to.revertedWith("Router: not enough liquidity");
     });
 
     it("handles the case in which there is a pair already", async () => {
@@ -438,6 +473,16 @@ describe("Router", () => {
         ),
         volatilePair.totalSupply(),
       ]);
+
+      await expect(
+        router.quoteAddLiquidity(
+          tokenA.address,
+          tokenB.address,
+          false,
+          0,
+          amountBOptimal.sub(parseEther("1"))
+        )
+      ).to.revertedWith("Router: no 0 amountA");
 
       expect(dataOne[0]).to.be.equal(amountADesired);
       expect(dataOne[1]).to.be.equal(amountBOptimal);
@@ -995,6 +1040,20 @@ describe("Router", () => {
         .div(totalSupply);
 
       const amountB = aliceBalance.div(3).mul(parseEther("9")).div(totalSupply);
+
+      await expect(
+        router
+          .connect(alice)
+          .removeLiquidityBNB(
+            tokenA.address,
+            false,
+            aliceBalance.div(3),
+            0,
+            0,
+            ethers.constants.AddressZero,
+            ethers.constants.MaxUint256
+          )
+      ).to.revertedWith("Router: Failed to transfer");
 
       await expect(
         router

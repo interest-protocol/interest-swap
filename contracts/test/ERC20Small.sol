@@ -85,6 +85,7 @@ contract ERC20Small {
         address to,
         uint256 amount
     ) internal virtual {
+        require(to != address(0), "ERC20: no zero address");
         uint256 fromBalance = _balances[from];
         require(
             fromBalance >= amount,

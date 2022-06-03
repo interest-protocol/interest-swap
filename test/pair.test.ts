@@ -10,6 +10,7 @@ import {
   ERC20Small,
   ERC20RMint,
   FlashLoan,
+  Helper,
 } from "../typechain";
 
 import {
@@ -44,6 +45,7 @@ describe("Pair", () => {
   let tokenA: ERC20;
   let tokenB: ERC20;
   let tokenC: ERC20Small;
+  let helper: Helper;
 
   let owner: SignerWithAddress;
   let alice: SignerWithAddress;
@@ -51,12 +53,12 @@ describe("Pair", () => {
   let treasury: SignerWithAddress;
 
   beforeEach(async () => {
-    [[owner, alice, bob, treasury], [factory, tokenA, tokenB, tokenC]] =
+    [[owner, alice, bob, treasury], [factory, helper, tokenA, tokenB, tokenC]] =
       await Promise.all([
         ethers.getSigners(),
         multiDeploy(
-          ["Factory", "ERC20", "ERC20", "ERC20Small"],
-          [[], ["TokenA", "TA"], ["TokenB", "TB"], ["Small Token", "ST"]]
+          ["Factory", "Helper", "ERC20", "ERC20", "ERC20Small"],
+          [[], [], ["TokenA", "TA"], ["TokenB", "TB"], ["Small Token", "ST"]]
         ),
       ]);
 
@@ -131,6 +133,108 @@ describe("Pair", () => {
     expect(sFeesContract > ethers.constants.AddressZero).to.be.equal(true);
   });
 
+  it("claims fees", async () => {
+    await factory.createPair(tokenA.address, tokenB.address, true);
+
+    const pair = (await ethers.getContractFactory("Pair")).attach(
+      await factory.getPair(tokenA.address, tokenB.address, true)
+    );
+
+    await Promise.all([
+      tokenA.connect(alice).transfer(pair.address, parseEther("2000")),
+      tokenB.connect(alice).transfer(pair.address, parseEther("2000")),
+    ]);
+
+    await expect(pair.mint(alice.address));
+
+    const swapTokenA = async () => {
+      for (let i = 0; i < 10; i++) {
+        const amountOut = await pair.getAmountOut(
+          tokenA.address,
+          parseEther("10")
+        );
+
+        await tokenA.connect(alice).transfer(pair.address, parseEther("10"));
+
+        const amount0Out = tokenA.address > tokenB.address ? amountOut : 0;
+        const amount1Out = tokenA.address > tokenB.address ? 0 : amountOut;
+
+        await pair
+          .connect(alice)
+          .swap(amount0Out, amount1Out, alice.address, []);
+      }
+    };
+
+    const swapTokenB = async () => {
+      for (let i = 0; i < 10; i++) {
+        const amountOut = await pair.getAmountOut(
+          tokenB.address,
+          parseEther("10")
+        );
+
+        await tokenB.connect(alice).transfer(pair.address, parseEther("10"));
+
+        const amount0Out = tokenA.address > tokenB.address ? 0 : amountOut;
+        const amount1Out = tokenA.address > tokenB.address ? amountOut : 0;
+
+        await pair
+          .connect(alice)
+          .swap(amount0Out, amount1Out, alice.address, []);
+      }
+    };
+
+    await swapTokenA();
+    await swapTokenB();
+
+    await pair.updateFeesFor(alice.address);
+
+    const [, , claimable0, claimable1] = await pair.getAccountFeesRewards(
+      alice.address
+    );
+
+    await expect(pair.connect(alice).claimFees())
+      .to.emit(pair, "Claim")
+      .withArgs(alice.address, claimable0, claimable1);
+
+    const [, , claimableTwo0, claimableTwo1] = await pair.getAccountFeesRewards(
+      alice.address
+    );
+
+    expect(claimableTwo0).to.be.equal(0);
+    expect(claimableTwo1).to.be.equal(0);
+
+    await expect(pair.connect(alice).claimFees()).to.not.emit(pair, "Claim");
+  });
+
+  it("handles extreme cases of amounts out for stable pairs", async () => {
+    await factory.createPair(tokenA.address, tokenB.address, true);
+
+    const pair = (await ethers.getContractFactory("Pair")).attach(
+      await factory.getPair(tokenA.address, tokenB.address, true)
+    );
+
+    await Promise.all([
+      tokenA.connect(alice).transfer(pair.address, parseEther("1000")),
+      tokenB.connect(alice).transfer(pair.address, parseEther("800")),
+    ]);
+
+    await pair.mint(alice.address);
+
+    await Promise.all([
+      expect(pair.getAmountOut(tokenA.address, parseEther("990"))).to.not
+        .reverted,
+      expect(pair.getAmountOut(tokenB.address, parseEther("990"))).to.not
+        .reverted,
+      expect(pair.getAmountOut(tokenA.address, parseEther("100000"))).to.not
+        .reverted,
+      expect(pair.getAmountOut(tokenB.address, parseEther("100000"))).to.not
+        .reverted,
+      expect(pair.getAmountOut(tokenB.address, 0)).to.not.reverted,
+      expect(pair.getAmountOut(tokenA.address, 10)).to.not.reverted,
+      expect(pair.getAmountOut(tokenB.address, 10)).to.not.reverted,
+    ]);
+  });
+
   describe("ERC20 functionality", () => {
     it("has all ERC20 metadata", async () => {
       await factory.createPair(tokenA.address, tokenB.address, true);
@@ -144,10 +248,10 @@ describe("Pair", () => {
         stablePairAddress
       );
 
-      const [token0Address] = sortTokens(tokenA.address, tokenB.address);
+      const erc20Factory = await ethers.getContractFactory("ERC20");
 
-      const token0 = token0Address === tokenA.address ? tokenA : tokenB;
-      const token1 = token0Address === tokenA.address ? tokenB : tokenA;
+      const token0 = erc20Factory.attach(await stablePair.token0());
+      const token1 = erc20Factory.attach(await stablePair.token1());
 
       const [
         decimals,
@@ -531,8 +635,13 @@ describe("Pair", () => {
         .sub(firstObservation.reserve1Cumulative)
         .div(timeElapsed);
 
-      const reserveA = tokenA.address > tokenB.address ? reserve1 : reserve0;
-      const reserveB = tokenA.address > tokenB.address ? reserve0 : reserve1;
+      const [tokenAAddress] = await helper.sortTokens(
+        tokenA.address,
+        tokenB.address
+      );
+
+      const reserveA = tokenA.address === tokenAAddress ? reserve0 : reserve1;
+      const reserveB = tokenA.address === tokenAAddress ? reserve1 : reserve0;
 
       await network.provider.send("evm_increaseTime", [100]);
 
@@ -1271,10 +1380,15 @@ describe("Pair", () => {
           tokenB.balanceOf(volatilePair.address),
         ]);
 
+      const [tokenAAddress] = await helper.sortTokens(
+        tokenA.address,
+        tokenB.address
+      );
+
       const balance0 =
-        tokenA.address > tokenB.address ? tokenBBalance : tokenABalance;
+        tokenA.address === tokenAAddress ? tokenABalance : tokenBBalance;
       const balance1 =
-        tokenA.address > tokenB.address ? tokenABalance : tokenBBalance;
+        tokenA.address === tokenAAddress ? tokenBBalance : tokenABalance;
 
       expect(balance0.gt(reserve0)).to.be.equal(true);
       expect(balance1.gt(reserve1)).to.be.equal(true);
@@ -1293,9 +1407,9 @@ describe("Pair", () => {
         ]);
 
       const balanceTwo0 =
-        tokenA.address > tokenB.address ? tokenBBalanceTwo : tokenABalanceTwo;
+        tokenA.address === tokenAAddress ? tokenABalanceTwo : tokenBBalanceTwo;
       const balanceTwo1 =
-        tokenA.address > tokenB.address ? tokenABalanceTwo : tokenBBalanceTwo;
+        tokenA.address === tokenAAddress ? tokenBBalanceTwo : tokenABalanceTwo;
 
       expect(balanceTwo0.eq(reserveTwo0)).to.be.equal(true);
       expect(balanceTwo1.eq(reserveTwo1)).to.be.equal(true);

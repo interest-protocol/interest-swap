@@ -39,12 +39,7 @@ contract Pair is IERC20 {
         address indexed to
     );
     event Sync(uint256 reserve0, uint256 reserve1);
-    event Claim(
-        address indexed sender,
-        address indexed recipient,
-        uint256 amount0,
-        uint256 amount1
-    );
+    event Claim(address indexed recipient, uint256 amount0, uint256 amount1);
 
     // ERC20 Metadata
     string public name;
@@ -288,7 +283,7 @@ contract Pair is IERC20 {
             // Send the fees to the `msg.sender`.
             Fees(feesContract).claimFor(msg.sender, claimed0, claimed1);
 
-            emit Claim(msg.sender, msg.sender, claimed0, claimed1);
+            emit Claim(msg.sender, claimed0, claimed1);
         }
     }
 
@@ -459,6 +454,15 @@ contract Pair is IERC20 {
 
         // Calculate he price in the opposite token
         amountOut = _computeAmountOut(amountIn, tokenIn, _reserve0, _reserve1);
+    }
+
+    /**
+     * @dev Updates the fees for an account
+     *
+     * @param account updates the fees for `account`
+     */
+    function updateFeesFor(address account) external {
+        _updateFeesFor(account);
     }
 
     /**

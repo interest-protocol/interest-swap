@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.13;
+pragma solidity 0.8.15;
+
+import "./interfaces/IFactory.sol";
 
 import "./Pair.sol";
 
@@ -10,19 +12,7 @@ import "./Pair.sol";
  * Stable pair uses the curve formula x3y+y3x >= k
  * This code is based on UniswapV2 and Solidly, all merit goes to them.
  */
-contract Factory {
-    event PairCreated(
-        address indexed token0,
-        address indexed token1,
-        bool stable,
-        address pair,
-        uint256
-    );
-
-    event NewTreasury(address indexed oldTreasury, address indexed newTreasury);
-
-    event NewGovernor(address indexed oldGovernor, address indexed newGovernor);
-
+contract Factory is IFactory {
     // Treasury address
     address public feeTo;
     // Int Governor.

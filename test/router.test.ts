@@ -6,10 +6,10 @@ import { ethers, network } from "hardhat";
 import {
   Factory,
   Router,
-  WBNB,
   ERC20,
   Pair,
   BrokenBNBReceiver,
+  WNT,
 } from "../typechain";
 
 import {
@@ -31,7 +31,7 @@ const MINIMUM_LIQUIDITY = ethers.BigNumber.from(1000);
 describe("Router", () => {
   let factory: Factory;
   let router: Router;
-  let wbnb: WBNB;
+  let wnt: WNT;
   let volatilePair: Pair;
 
   let tokenA: ERC20;
@@ -42,11 +42,11 @@ describe("Router", () => {
   let alice: SignerWithAddress;
 
   beforeEach(async () => {
-    [[owner, alice], [factory, tokenA, tokenB, tokenC, wbnb]] =
+    [[owner, alice], [factory, tokenA, tokenB, tokenC, wnt]] =
       await Promise.all([
         ethers.getSigners(),
         multiDeploy(
-          ["Factory", "ERC20", "ERC20", "ERC20", "WBNB"],
+          ["Factory", "ERC20", "ERC20", "ERC20", "WNT"],
           [[], ["TokenA", "TA"], ["TokenB", "TB"], ["TokenC", "TC"], []]
         ),
       ]);
@@ -63,7 +63,7 @@ describe("Router", () => {
       pairAddress
     );
 
-    router = await deploy("Router", [factory.address, wbnb.address]);
+    router = await deploy("Router", [factory.address, wnt.address]);
 
     await Promise.all([
       tokenA.mint(alice.address, parseEther("100000")),
@@ -84,16 +84,16 @@ describe("Router", () => {
     ]);
   });
 
-  const getTokenAWBNBContract = async () => {
+  const getTokenAWNTContract = async () => {
     const pairAddress = await router.pairFor(
       tokenA.address,
-      wbnb.address,
+      wnt.address,
       false
     );
 
     await Promise.all([
-      factory.createPair(tokenA.address, wbnb.address, false),
-      wbnb.connect(alice).deposit({ value: parseEther("20") }),
+      factory.createPair(tokenA.address, wnt.address, false),
+      wnt.connect(alice).deposit({ value: parseEther("20") }),
     ]);
 
     const contract = (await ethers.getContractFactory("Pair")).attach(
@@ -107,8 +107,8 @@ describe("Router", () => {
     return contract;
   };
 
-  it("sets the WBNB to the correct address", async () => {
-    expect(await router.WBNB()).to.be.equal(wbnb.address);
+  it("sets the wnt to the correct address", async () => {
+    expect(await router.WNT()).to.be.equal(wnt.address);
   });
 
   describe("function: sortTokens", () => {
@@ -811,12 +811,12 @@ describe("Router", () => {
     });
   });
 
-  describe("function: addLiquidityBNB", () => {
+  describe("function: addLiquidityNativeToken", () => {
     it("revert if the deadline has passed", async () => {
       await expect(
         router
           .connect(alice)
-          .addLiquidityBNB(
+          .addLiquidityNativeToken(
             tokenA.address,
             false,
             parseEther("100"),
@@ -830,7 +830,7 @@ describe("Router", () => {
 
     it("reverts if the transferFrom fails", async () => {
       await expect(
-        router.addLiquidityBNB(
+        router.addLiquidityNativeToken(
           tokenA.address,
           false,
           ethers.constants.MaxUint256,
@@ -843,16 +843,16 @@ describe("Router", () => {
       ).to.be.revertedWith("Router: Failed to transferFrom");
     });
 
-    it("reverts if the recipient cannot receive BNB", async () => {
+    it("reverts if the recipient cannot receive WNT", async () => {
       const brokenBNBReceiver: BrokenBNBReceiver = await deploy(
         "BrokenBNBReceiver",
         []
       );
 
-      const pair = await getTokenAWBNBContract();
+      const pair = await getTokenAWNTContract();
 
       await Promise.all([
-        wbnb.connect(alice).transfer(pair.address, parseEther("10")),
+        wnt.connect(alice).transfer(pair.address, parseEther("10")),
         tokenA.connect(alice).transfer(pair.address, parseEther("25")),
         tokenA
           .connect(alice)
@@ -861,7 +861,7 @@ describe("Router", () => {
 
       await pair.mint(alice.address);
 
-      const amountWBNBOptimal = quoteLiquidity(
+      const amountWNTOptimal = quoteLiquidity(
         parseEther("2"),
         parseEther("25"),
         parseEther("10")
@@ -879,20 +879,20 @@ describe("Router", () => {
             0,
             brokenBNBReceiver.address,
             ethers.constants.MaxUint256,
-            { value: amountWBNBOptimal.add(parseEther("1")) }
+            { value: amountWNTOptimal.add(parseEther("1")) }
           )
-      ).to.revertedWith("Router: BNB transfer failed");
+      ).to.revertedWith("Router: NT transfer failed");
     });
 
-    it("adds BNB liquidity", async () => {
-      const pair = await getTokenAWBNBContract();
+    it("adds Native Token liquidity", async () => {
+      const pair = await getTokenAWNTContract();
 
       expect(await pair.balanceOf(alice.address)).to.be.equal(0);
 
       await expect(
         router
           .connect(alice)
-          .addLiquidityBNB(
+          .addLiquidityNativeToken(
             tokenA.address,
             false,
             parseEther("10"),
@@ -903,7 +903,7 @@ describe("Router", () => {
             { value: parseEther("12") }
           )
       )
-        .to.emit(wbnb, "Transfer")
+        .to.emit(wnt, "Transfer")
         .withArgs(router.address, pair.address, parseEther("12"))
         .to.emit(tokenA, "Transfer")
         .withArgs(alice.address, pair.address, parseEther("10"));
@@ -1004,10 +1004,10 @@ describe("Router", () => {
     });
   });
 
-  describe("function: removeLiquidityBNB", () => {
+  describe("function: removeLiquidityNativeToken", () => {
     it("reverts if it is past the deadline", async () => {
       await expect(
-        router.removeLiquidityBNB(
+        router.removeLiquidityNativeToken(
           tokenA.address,
           false,
           0,
@@ -1019,11 +1019,11 @@ describe("Router", () => {
       ).to.revertedWith("Router: Expired");
     });
 
-    it("removes BNB liquidity", async () => {
-      const pair = await getTokenAWBNBContract();
+    it("removes Native Token liquidity", async () => {
+      const pair = await getTokenAWNTContract();
 
       await Promise.all([
-        wbnb.connect(alice).transfer(pair.address, parseEther("9")),
+        wnt.connect(alice).transfer(pair.address, parseEther("9")),
         tokenA.connect(alice).transfer(pair.address, parseEther("145")),
       ]);
 
@@ -1043,7 +1043,7 @@ describe("Router", () => {
       await expect(
         router
           .connect(alice)
-          .removeLiquidityBNB(
+          .removeLiquidityNativeToken(
             tokenA.address,
             false,
             aliceBalance.div(3),
@@ -1057,7 +1057,7 @@ describe("Router", () => {
       await expect(
         router
           .connect(alice)
-          .removeLiquidityBNB(
+          .removeLiquidityNativeToken(
             tokenA.address,
             false,
             aliceBalance.div(3),
@@ -1227,9 +1227,9 @@ describe("Router", () => {
     });
   });
 
-  describe("function: removeLiquidityBNBWithPermit", () => {
+  describe("function: removeLiquidityNativeTokenWithPermit", () => {
     it("removes liquidity with  permit without max allowance", async () => {
-      const pair = await getTokenAWBNBContract();
+      const pair = await getTokenAWNTContract();
 
       // make sure we have no allowance
       await pair.connect(alice).approve(router.address, 0);
@@ -1248,7 +1248,7 @@ describe("Router", () => {
 
       await Promise.all([
         tokenA.connect(alice).transfer(pair.address, parseEther("145")),
-        wbnb.connect(alice).transfer(pair.address, parseEther("12")),
+        wnt.connect(alice).transfer(pair.address, parseEther("12")),
       ]);
 
       await pair.mint(alice.address);
@@ -1282,7 +1282,7 @@ describe("Router", () => {
       await expect(
         router
           .connect(alice)
-          .removeLiquidityBNBWithPermit(
+          .removeLiquidityNativeTokenWithPermit(
             tokenA.address,
             false,
             aliceBalance.div(3),
@@ -1312,7 +1312,7 @@ describe("Router", () => {
     });
 
     it("removes liquidity with  permit with max allowance", async () => {
-      const pair = await getTokenAWBNBContract();
+      const pair = await getTokenAWNTContract();
 
       // make sure we have no allowance
       await pair.connect(alice).approve(router.address, 0);
@@ -1331,7 +1331,7 @@ describe("Router", () => {
 
       await Promise.all([
         tokenA.connect(alice).transfer(pair.address, parseEther("145")),
-        wbnb.connect(alice).transfer(pair.address, parseEther("12")),
+        wnt.connect(alice).transfer(pair.address, parseEther("12")),
       ]);
 
       await pair.mint(alice.address);
@@ -1365,7 +1365,7 @@ describe("Router", () => {
       await expect(
         router
           .connect(alice)
-          .removeLiquidityBNBWithPermit(
+          .removeLiquidityNativeTokenWithPermit(
             tokenA.address,
             false,
             aliceBalance.div(3),
@@ -1429,47 +1429,47 @@ describe("Router", () => {
     it("swaps between the best possible price", async () => {
       const [pairFactory] = await Promise.all([
         ethers.getContractFactory("Pair"),
-        factory.createPair(wbnb.address, tokenA.address, false),
-        factory.createPair(wbnb.address, tokenB.address, false),
-        factory.createPair(wbnb.address, tokenB.address, true),
-        wbnb.connect(alice).deposit({ value: parseEther("30") }),
+        factory.createPair(wnt.address, tokenA.address, false),
+        factory.createPair(wnt.address, tokenB.address, false),
+        factory.createPair(wnt.address, tokenB.address, true),
+        wnt.connect(alice).deposit({ value: parseEther("30") }),
       ]);
 
-      const [vwbnbTokenAAddress, vwbnbTokenBAddress, swbnbTokenBAddress] =
+      const [vwntTokenAAddress, vwntTokenBAddress, swntTokenBAddress] =
         await Promise.all([
-          factory.getPair(wbnb.address, tokenA.address, false),
-          factory.getPair(wbnb.address, tokenB.address, false),
-          factory.getPair(wbnb.address, tokenB.address, true),
+          factory.getPair(wnt.address, tokenA.address, false),
+          factory.getPair(wnt.address, tokenB.address, false),
+          factory.getPair(wnt.address, tokenB.address, true),
         ]);
 
-      const [vwbnbTokenA, vwbnbTokenB, swbnbTokenB] = [
-        pairFactory.attach(vwbnbTokenAAddress),
-        pairFactory.attach(vwbnbTokenBAddress),
-        pairFactory.attach(swbnbTokenBAddress),
+      const [vwntTokenA, vwntTokenB, swntTokenB] = [
+        pairFactory.attach(vwntTokenAAddress),
+        pairFactory.attach(vwntTokenBAddress),
+        pairFactory.attach(swntTokenBAddress),
       ];
 
       await Promise.all([
-        wbnb.connect(alice).transfer(vwbnbTokenAAddress, parseEther("10")),
-        tokenA.connect(alice).transfer(vwbnbTokenAAddress, parseEther("25")),
-        wbnb.connect(alice).transfer(vwbnbTokenBAddress, parseEther("10")),
-        tokenB.connect(alice).transfer(vwbnbTokenBAddress, parseEther("6")),
-        wbnb.connect(alice).transfer(swbnbTokenBAddress, parseEther("10")),
-        tokenB.connect(alice).transfer(swbnbTokenBAddress, parseEther("10")),
+        wnt.connect(alice).transfer(vwntTokenAAddress, parseEther("10")),
+        tokenA.connect(alice).transfer(vwntTokenAAddress, parseEther("25")),
+        wnt.connect(alice).transfer(vwntTokenBAddress, parseEther("10")),
+        tokenB.connect(alice).transfer(vwntTokenBAddress, parseEther("6")),
+        wnt.connect(alice).transfer(swntTokenBAddress, parseEther("10")),
+        tokenB.connect(alice).transfer(swntTokenBAddress, parseEther("10")),
       ]);
 
       await Promise.all([
-        vwbnbTokenA.mint(alice.address),
-        vwbnbTokenB.mint(alice.address),
-        swbnbTokenB.mint(alice.address),
+        vwntTokenA.mint(alice.address),
+        vwntTokenB.mint(alice.address),
+        swntTokenB.mint(alice.address),
       ]);
 
-      const firstSwapOutput = await vwbnbTokenA.getAmountOut(
+      const firstSwapOutput = await vwntTokenA.getAmountOut(
         tokenA.address,
         parseEther("2")
       );
 
-      const secondSwapOutput = await swbnbTokenB.getAmountOut(
-        wbnb.address,
+      const secondSwapOutput = await swntTokenB.getAmountOut(
+        wnt.address,
         firstSwapOutput
       );
 
@@ -1478,30 +1478,30 @@ describe("Router", () => {
           parseEther("2"),
           secondSwapOutput.sub(parseEther("0.1")),
           [
-            { from: tokenA.address, to: wbnb.address },
-            { from: wbnb.address, to: tokenB.address },
+            { from: tokenA.address, to: wnt.address },
+            { from: wnt.address, to: tokenB.address },
           ],
           alice.address,
           ethers.constants.MaxUint256
         )
       )
         .to.emit(tokenB, "Transfer")
-        .withArgs(swbnbTokenB.address, alice.address, secondSwapOutput);
+        .withArgs(swntTokenB.address, alice.address, secondSwapOutput);
     });
   });
 
-  describe("function: swapExactBNBForTokens", () => {
+  describe("function: swapExactNativeTokenForTokens", () => {
     it("reverts if  the deadline has passed", async () => {
       await expect(
-        router.swapExactBNBForTokens(0, [], alice.address, 0)
+        router.swapExactNativeTokenForTokens(0, [], alice.address, 0)
       ).to.revertedWith("Router: Expired");
     });
 
-    it("reverts if first from is not WBNB", async () => {
+    it("reverts if first from is not wnt", async () => {
       await expect(
-        router.swapExactBNBForTokens(
+        router.swapExactNativeTokenForTokens(
           0,
-          [{ from: tokenA.address, to: wbnb.address }],
+          [{ from: tokenA.address, to: wnt.address }],
           alice.address,
           ethers.constants.MaxUint256
         )
@@ -1511,38 +1511,38 @@ describe("Router", () => {
     it("finds best price", async () => {
       const [pairFactory] = await Promise.all([
         ethers.getContractFactory("Pair"),
-        factory.createPair(wbnb.address, tokenA.address, false),
-        factory.createPair(wbnb.address, tokenA.address, true),
-        wbnb.connect(alice).deposit({ value: parseEther("50") }),
+        factory.createPair(wnt.address, tokenA.address, false),
+        factory.createPair(wnt.address, tokenA.address, true),
+        wnt.connect(alice).deposit({ value: parseEther("50") }),
       ]);
 
-      const [vwbnbTokenAAddress, swbnbTokenAAddress] = await Promise.all([
-        factory.getPair(wbnb.address, tokenA.address, false),
-        factory.getPair(wbnb.address, tokenA.address, true),
+      const [vwntTokenAAddress, swntTokenAAddress] = await Promise.all([
+        factory.getPair(wnt.address, tokenA.address, false),
+        factory.getPair(wnt.address, tokenA.address, true),
       ]);
 
-      const [vwbnbTokenA, swbnbTokenA] = [
-        pairFactory.attach(vwbnbTokenAAddress),
-        pairFactory.attach(swbnbTokenAAddress),
+      const [vwntTokenA, swntTokenA] = [
+        pairFactory.attach(vwntTokenAAddress),
+        pairFactory.attach(swntTokenAAddress),
       ];
 
       await Promise.all([
-        wbnb.connect(alice).transfer(vwbnbTokenAAddress, parseEther("20")),
-        tokenA.connect(alice).transfer(vwbnbTokenAAddress, parseEther("50")),
-        wbnb.connect(alice).transfer(swbnbTokenAAddress, parseEther("25")),
-        tokenA.connect(alice).transfer(swbnbTokenAAddress, parseEther("25")),
+        wnt.connect(alice).transfer(vwntTokenAAddress, parseEther("20")),
+        tokenA.connect(alice).transfer(vwntTokenAAddress, parseEther("50")),
+        wnt.connect(alice).transfer(swntTokenAAddress, parseEther("25")),
+        tokenA.connect(alice).transfer(swntTokenAAddress, parseEther("25")),
         tokenA.connect(alice).transfer(volatilePair.address, parseEther("25")),
         tokenB.connect(alice).transfer(volatilePair.address, parseEther("50")),
       ]);
 
       await Promise.all([
-        vwbnbTokenA.mint(alice.address),
+        vwntTokenA.mint(alice.address),
         volatilePair.mint(alice.address),
-        swbnbTokenA.mint(alice.address),
+        swntTokenA.mint(alice.address),
       ]);
 
-      const firstSwapOutput = await vwbnbTokenA.getAmountOut(
-        wbnb.address,
+      const firstSwapOutput = await vwntTokenA.getAmountOut(
+        wnt.address,
         parseEther("2")
       );
 
@@ -1552,10 +1552,10 @@ describe("Router", () => {
       );
 
       await expect(
-        router.connect(alice).swapExactBNBForTokens(
+        router.connect(alice).swapExactNativeTokenForTokens(
           secondSwapOutput,
           [
-            { from: wbnb.address, to: tokenA.address },
+            { from: wnt.address, to: tokenA.address },
             { from: tokenA.address, to: tokenB.address },
           ],
           alice.address,
@@ -1570,32 +1570,32 @@ describe("Router", () => {
     it("reverts if the trade incurs too much slippage", async () => {
       const [pairFactory] = await Promise.all([
         ethers.getContractFactory("Pair"),
-        factory.createPair(wbnb.address, tokenA.address, false),
-        wbnb.connect(alice).deposit({ value: parseEther("30") }),
+        factory.createPair(wnt.address, tokenA.address, false),
+        wnt.connect(alice).deposit({ value: parseEther("30") }),
       ]);
 
-      const vwbnbTokenAAddress = await factory.getPair(
-        wbnb.address,
+      const vwntTokenAAddress = await factory.getPair(
+        wnt.address,
         tokenA.address,
         false
       );
 
-      const vwbnbTokenA = pairFactory.attach(vwbnbTokenAAddress);
+      const vwntTokenA = pairFactory.attach(vwntTokenAAddress);
 
       await Promise.all([
-        wbnb.connect(alice).transfer(vwbnbTokenAAddress, parseEther("10")),
-        tokenA.connect(alice).transfer(vwbnbTokenAAddress, parseEther("25")),
+        wnt.connect(alice).transfer(vwntTokenAAddress, parseEther("10")),
+        tokenA.connect(alice).transfer(vwntTokenAAddress, parseEther("25")),
         tokenA.connect(alice).transfer(volatilePair.address, parseEther("25")),
         tokenB.connect(alice).transfer(volatilePair.address, parseEther("50")),
       ]);
 
       await Promise.all([
-        vwbnbTokenA.mint(alice.address),
+        vwntTokenA.mint(alice.address),
         volatilePair.mint(alice.address),
       ]);
 
-      const firstSwapOutput = await vwbnbTokenA.getAmountOut(
-        wbnb.address,
+      const firstSwapOutput = await vwntTokenA.getAmountOut(
+        wnt.address,
         parseEther("2")
       );
 
@@ -1605,10 +1605,10 @@ describe("Router", () => {
       );
 
       await expect(
-        router.connect(alice).swapExactBNBForTokens(
+        router.connect(alice).swapExactNativeTokenForTokens(
           secondSwapOutput.add(parseEther("0.1")),
           [
-            { from: wbnb.address, to: tokenA.address },
+            { from: wnt.address, to: tokenA.address },
             { from: tokenA.address, to: tokenB.address },
           ],
           alice.address,
@@ -1622,16 +1622,16 @@ describe("Router", () => {
   describe("function: swapExactTokensForBNB", () => {
     it("reverts if  the deadline has passed", async () => {
       await expect(
-        router.swapExactTokensForBNB(0, 0, [], alice.address, 0)
+        router.swapExactTokensForNativeToken(0, 0, [], alice.address, 0)
       ).to.revertedWith("Router: Expired");
     });
 
-    it("reverts if the route does not end in WBNB", async () => {
+    it("reverts if the route does not end in wnt", async () => {
       await expect(
-        router.swapExactTokensForBNB(
+        router.swapExactTokensForNativeToken(
           0,
           0,
-          [{ from: wbnb.address, to: tokenA.address }],
+          [{ from: wnt.address, to: tokenA.address }],
           alice.address,
           ethers.constants.MaxUint256
         )
@@ -1641,27 +1641,27 @@ describe("Router", () => {
     it("reverts if it incurs too much slippage", async () => {
       const [pairFactory] = await Promise.all([
         ethers.getContractFactory("Pair"),
-        factory.createPair(wbnb.address, tokenA.address, false),
-        wbnb.connect(alice).deposit({ value: parseEther("30") }),
+        factory.createPair(wnt.address, tokenA.address, false),
+        wnt.connect(alice).deposit({ value: parseEther("30") }),
       ]);
 
-      const vwbnbTokenAAddress = await factory.getPair(
-        wbnb.address,
+      const vwntTokenAAddress = await factory.getPair(
+        wnt.address,
         tokenA.address,
         false
       );
 
-      const vwbnbTokenA = pairFactory.attach(vwbnbTokenAAddress);
+      const vwntTokenA = pairFactory.attach(vwntTokenAAddress);
 
       await Promise.all([
-        wbnb.connect(alice).transfer(vwbnbTokenAAddress, parseEther("10")),
-        tokenA.connect(alice).transfer(vwbnbTokenAAddress, parseEther("25")),
+        wnt.connect(alice).transfer(vwntTokenAAddress, parseEther("10")),
+        tokenA.connect(alice).transfer(vwntTokenAAddress, parseEther("25")),
         tokenA.connect(alice).transfer(volatilePair.address, parseEther("25")),
         tokenB.connect(alice).transfer(volatilePair.address, parseEther("50")),
       ]);
 
       await Promise.all([
-        vwbnbTokenA.mint(alice.address),
+        vwntTokenA.mint(alice.address),
         volatilePair.mint(alice.address),
       ]);
 
@@ -1670,18 +1670,18 @@ describe("Router", () => {
         parseEther("2")
       );
 
-      const secondSwapOutput = await vwbnbTokenA.getAmountOut(
+      const secondSwapOutput = await vwntTokenA.getAmountOut(
         tokenA.address,
         firstSwapOutput
       );
 
       await expect(
-        router.connect(alice).swapExactTokensForBNB(
+        router.connect(alice).swapExactTokensForNativeToken(
           parseEther("2"),
           secondSwapOutput.add(parseEther("0.1")),
           [
             { from: tokenB.address, to: tokenA.address },
-            { from: tokenA.address, to: wbnb.address },
+            { from: tokenA.address, to: wnt.address },
           ],
           alice.address,
           ethers.constants.MaxUint256
@@ -1692,34 +1692,34 @@ describe("Router", () => {
     it("finds best price", async () => {
       const [pairFactory] = await Promise.all([
         ethers.getContractFactory("Pair"),
-        factory.createPair(wbnb.address, tokenA.address, false),
-        factory.createPair(wbnb.address, tokenA.address, true),
-        wbnb.connect(alice).deposit({ value: parseEther("50") }),
+        factory.createPair(wnt.address, tokenA.address, false),
+        factory.createPair(wnt.address, tokenA.address, true),
+        wnt.connect(alice).deposit({ value: parseEther("50") }),
       ]);
 
-      const [vwbnbTokenAAddress, swbnbTokenAAddress] = await Promise.all([
-        factory.getPair(wbnb.address, tokenA.address, false),
-        factory.getPair(wbnb.address, tokenA.address, true),
+      const [vwntTokenAAddress, swntTokenAAddress] = await Promise.all([
+        factory.getPair(wnt.address, tokenA.address, false),
+        factory.getPair(wnt.address, tokenA.address, true),
       ]);
 
-      const [vwbnbTokenA, swbnbTokenA] = [
-        pairFactory.attach(vwbnbTokenAAddress),
-        pairFactory.attach(swbnbTokenAAddress),
+      const [vwntTokenA, swntTokenA] = [
+        pairFactory.attach(vwntTokenAAddress),
+        pairFactory.attach(swntTokenAAddress),
       ];
 
       await Promise.all([
-        wbnb.connect(alice).transfer(vwbnbTokenAAddress, parseEther("20")),
-        tokenA.connect(alice).transfer(vwbnbTokenAAddress, parseEther("50")),
-        wbnb.connect(alice).transfer(swbnbTokenAAddress, parseEther("25")),
-        tokenA.connect(alice).transfer(swbnbTokenAAddress, parseEther("25")),
+        wnt.connect(alice).transfer(vwntTokenAAddress, parseEther("20")),
+        tokenA.connect(alice).transfer(vwntTokenAAddress, parseEther("50")),
+        wnt.connect(alice).transfer(swntTokenAAddress, parseEther("25")),
+        tokenA.connect(alice).transfer(swntTokenAAddress, parseEther("25")),
         tokenA.connect(alice).transfer(volatilePair.address, parseEther("25")),
         tokenB.connect(alice).transfer(volatilePair.address, parseEther("50")),
       ]);
 
       await Promise.all([
-        vwbnbTokenA.mint(alice.address),
+        vwntTokenA.mint(alice.address),
         volatilePair.mint(alice.address),
-        swbnbTokenA.mint(alice.address),
+        swntTokenA.mint(alice.address),
       ]);
 
       const firstSwapOutput = await volatilePair.getAmountOut(
@@ -1727,7 +1727,7 @@ describe("Router", () => {
         parseEther("2")
       );
 
-      const secondSwapOutput = await swbnbTokenA.getAmountOut(
+      const secondSwapOutput = await swntTokenA.getAmountOut(
         tokenA.address,
         firstSwapOutput
       );
@@ -1735,12 +1735,12 @@ describe("Router", () => {
       const aliceBalance = await alice.getBalance();
 
       await expect(
-        router.connect(alice).swapExactTokensForBNB(
+        router.connect(alice).swapExactTokensForNativeToken(
           parseEther("2"),
           secondSwapOutput,
           [
             { from: tokenB.address, to: tokenA.address },
-            { from: tokenA.address, to: wbnb.address },
+            { from: tokenA.address, to: wnt.address },
           ],
           alice.address,
           ethers.constants.MaxUint256

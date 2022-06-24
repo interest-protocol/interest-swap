@@ -1,17 +1,24 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity 0.8.13;
+pragma solidity 0.8.15;
 
 interface IRouter {
-    function addLiquidityBNB(
+    function addLiquidityNativeToken(
         address token,
         bool stable,
         uint256 amountTokenDesired,
         uint256 amountTokenMin,
-        uint256 amountBNBMin,
+        uint256 amountNativeTokenMin,
         address to,
         uint256 deadline
-    ) external payable;
+    )
+        external
+        payable
+        returns (
+            uint256 amountToken,
+            uint256 amountNativeToken,
+            uint256 liquidity
+        );
 }
 
 interface IERC20 {
@@ -34,7 +41,7 @@ contract BrokenBNBReceiver {
         uint256 deadline
     ) external payable {
         IERC20(token).approve(address(router), type(uint256).max);
-        router.addLiquidityBNB{value: msg.value}(
+        router.addLiquidityNativeToken{value: msg.value}(
             token,
             stable,
             amountTokenDesired,

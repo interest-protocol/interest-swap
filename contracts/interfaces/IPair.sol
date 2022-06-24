@@ -1,16 +1,159 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.13;
+pragma solidity 0.8.15;
 
-interface IPair {
+import {Observation} from "../lib/DataTypes.sol";
+
+import "./IERC20.sol";
+
+interface IPair is IERC20 {
+    event UpdatedFee(address indexed sender, uint256 amount0, uint256 amount1);
+
+    event Mint(address indexed sender, uint256 amount0, uint256 amount1);
+
+    event Burn(
+        address indexed sender,
+        uint256 amount0,
+        uint256 amount1,
+        address indexed to
+    );
+
+    event Swap(
+        address indexed sender,
+        uint256 amount0In,
+        uint256 amount1In,
+        uint256 amount0Out,
+        uint256 amount1Out,
+        address indexed to
+    );
+
+    event Sync(uint256 reserve0, uint256 reserve1);
+
+    event Claim(address indexed recipient, uint256 amount0, uint256 amount1);
+
+    function stable() external view returns (bool);
+
+    function nonces(address) external view returns (uint256);
+
     function token0() external view returns (address);
 
     function token1() external view returns (address);
 
-    function transferFrom(
-        address src,
-        address dst,
-        uint256 amount
-    ) external returns (bool);
+    function feesContract() external view returns (address);
+
+    function observations(uint256)
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256
+        );
+
+    function reserve0() external view returns (uint256);
+
+    function reserve1() external view returns (uint256);
+
+    function blockTimestampLast() external view returns (uint256);
+
+    function reserve0CumulativeLast() external view returns (uint256);
+
+    function reserve1CumulativeLast() external view returns (uint256);
+
+    function index0() external view returns (uint256);
+
+    function index1() external view returns (uint256);
+
+    function supplyIndex0(address) external view returns (uint256);
+
+    function supplyIndex1(address) external view returns (uint256);
+
+    function claimable0(address) external view returns (uint256);
+
+    function claimable1(address) external view returns (uint256);
+
+    function observationLength() external view returns (uint256);
+
+    function getFirstObservationInWindow()
+        external
+        view
+        returns (Observation memory);
+
+    function observationIndexOf(uint256 timestamp)
+        external
+        pure
+        returns (uint256 index);
+
+    function metadata()
+        external
+        view
+        returns (
+            address t0,
+            address t1,
+            bool st,
+            uint256 fee,
+            uint256 r0,
+            uint256 r1,
+            uint256 dec0,
+            uint256 dec1
+        );
+
+    function getAccountFeesRewards(address account)
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256,
+            uint256
+        );
+
+    function claimFees() external;
+
+    function tokens() external view returns (address, address);
+
+    function getReserves()
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256
+        );
+
+    function getTokenPrice(address tokenIn, uint256 amountIn)
+        external
+        view
+        returns (uint256 amountOut);
+
+    function updateFeesFor(address account) external;
+
+    function mint(address to) external returns (uint256 liquidity);
+
+    function burn(address to)
+        external
+        returns (uint256 amount0, uint256 amount1);
+
+    function currentCumulativeReserves()
+        external
+        view
+        returns (
+            uint256 reserve0Cumulative,
+            uint256 reserve1Cumulative,
+            uint256 blockTimestamp
+        );
+
+    function swap(
+        uint256 amount0Out,
+        uint256 amount1Out,
+        address to,
+        bytes calldata data
+    ) external;
+
+    function skim(address to) external;
+
+    function sync() external;
+
+    function getAmountOut(address, uint256) external view returns (uint256);
 
     function permit(
         address owner,
@@ -21,28 +164,4 @@ interface IPair {
         bytes32 r,
         bytes32 s
     ) external;
-
-    function swap(
-        uint256 amount0Out,
-        uint256 amount1Out,
-        address to,
-        bytes calldata data
-    ) external;
-
-    function burn(address to)
-        external
-        returns (uint256 amount0, uint256 amount1);
-
-    function mint(address to) external returns (uint256 liquidity);
-
-    function getReserves()
-        external
-        view
-        returns (
-            uint112 _reserve0,
-            uint112 _reserve1,
-            uint32 _blockTimestampLast
-        );
-
-    function getAmountOut(address, uint256) external view returns (uint256);
 }

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity 0.8.13;
+pragma solidity 0.8.15;
 
 //solhint-disable
-contract WBNB {
-    string public name = "Wrapped BNB";
-    string public symbol = "WBNB";
+contract WNT {
+    string public name = "Wrapped Native Token";
+    string public symbol = "WNT";
     uint8 public decimals = 18;
 
     event Approval(address indexed src, address indexed guy, uint256 wad);

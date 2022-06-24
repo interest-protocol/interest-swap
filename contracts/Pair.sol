@@ -1,45 +1,21 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.13;
+pragma solidity 0.8.15;
 
-import "./interfaces/IERC20.sol";
 import "./interfaces/IFactory.sol";
+import "./interfaces/IPair.sol";
 import "./interfaces/IPairCallee.sol";
 
 import "./lib/Math.sol";
+import {Observation} from "./lib/DataTypes.sol";
 import "./lib/Address.sol";
 
 import "./Fees.sol";
 
-struct Observation {
-    uint256 timestamp;
-    uint256 reserve0Cumulative;
-    uint256 reserve1Cumulative;
-}
-
 //solhint-disable not-rely-on-time
 //solhint-disable-next-line max-states-count
-contract Pair is IERC20 {
+contract Pair is IPair {
     using Address for address;
     using Math for uint256;
-
-    event UpdatedFee(address indexed sender, uint256 amount0, uint256 amount1);
-    event Mint(address indexed sender, uint256 amount0, uint256 amount1);
-    event Burn(
-        address indexed sender,
-        uint256 amount0,
-        uint256 amount1,
-        address indexed to
-    );
-    event Swap(
-        address indexed sender,
-        uint256 amount0In,
-        uint256 amount1In,
-        uint256 amount0Out,
-        uint256 amount1Out,
-        address indexed to
-    );
-    event Sync(uint256 reserve0, uint256 reserve1);
-    event Claim(address indexed recipient, uint256 amount0, uint256 amount1);
 
     // ERC20 Metadata
     string public name;
@@ -73,7 +49,7 @@ contract Pair is IERC20 {
     uint256 private immutable swapFee; // Fee charged during swapping.
 
     // Settings for the TWAP
-    uint256 private constant WINDOW = 86400; // 24 hours
+    uint256 private constant WINDOW = 15 minutes;
     uint256 private constant GRANULARITY = 12; // TWAP updates every 2 hour
     uint256 private constant PERIOD_SIZE = WINDOW / GRANULARITY;
 

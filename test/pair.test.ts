@@ -28,7 +28,7 @@ import {
 
 const { parseEther } = ethers.utils;
 
-const PERIOD_SIZE = 86400 / 12;
+const PERIOD_SIZE = 900 / 12;
 
 const MINIMUM_LIQUIDITY = ethers.BigNumber.from(1000);
 
@@ -623,7 +623,7 @@ describe("Pair", () => {
 
       const firstObservation = await volatilePair.getFirstObservationInWindow();
 
-      const timeElapsed = ethers.BigNumber.from(blockTimestamp + 100).sub(
+      const timeElapsed = ethers.BigNumber.from(blockTimestamp + 5).sub(
         firstObservation.timestamp
       );
 
@@ -643,7 +643,7 @@ describe("Pair", () => {
       const reserveA = tokenA.address === tokenAAddress ? reserve0 : reserve1;
       const reserveB = tokenA.address === tokenAAddress ? reserve1 : reserve0;
 
-      await network.provider.send("evm_increaseTime", [100]);
+      await network.provider.send("evm_increaseTime", [5]);
 
       const tx = volatilePair.getTokenPrice(tokenA.address, parseEther("1"));
 
@@ -898,15 +898,20 @@ describe("Pair", () => {
       const [reserveTwo0, reserveTwo1, blockTimestampLastTwo] =
         await volatilePair.getReserves();
 
-      const amount0 =
-        tokenA.address > tokenB.address
-          ? parseEther("500")
-          : parseEther("1000");
+      const [sortedTokenA] = await helper.sortTokens(
+        tokenA.address,
+        tokenB.address
+      );
 
-      const amount1 =
-        tokenA.address > tokenB.address
+      const amount0 =
+        sortedTokenA === ethers.utils.getAddress(tokenA.address)
           ? parseEther("1000")
           : parseEther("500");
+
+      const amount1 =
+        sortedTokenA === ethers.utils.getAddress(tokenA.address)
+          ? parseEther("500")
+          : parseEther("1000");
 
       expect(blockTimestampLastTwo.gt(blockTimestampLast)).to.be.equal(true);
       expect(reserveTwo0).to.be.equal(amount0);
@@ -1061,8 +1066,19 @@ describe("Pair", () => {
             .connect(alice)
             .transfer(volatilePair.address, parseEther("10"));
 
-          const amount0Out = tokenA.address > tokenB.address ? amountOut : 0;
-          const amount1Out = tokenA.address > tokenB.address ? 0 : amountOut;
+          const [sortedTokenA] = await helper.sortTokens(
+            tokenA.address,
+            tokenB.address
+          );
+
+          const amount0Out =
+            sortedTokenA === ethers.utils.getAddress(tokenA.address)
+              ? 0
+              : amountOut;
+          const amount1Out =
+            sortedTokenA === ethers.utils.getAddress(tokenA.address)
+              ? amountOut
+              : 0;
 
           await volatilePair
             .connect(alice)
@@ -1081,8 +1097,19 @@ describe("Pair", () => {
             .connect(alice)
             .transfer(volatilePair.address, parseEther("10"));
 
-          const amount0Out = tokenA.address > tokenB.address ? 0 : amountOut;
-          const amount1Out = tokenA.address > tokenB.address ? amountOut : 0;
+          const [sortedTokenA] = await helper.sortTokens(
+            tokenA.address,
+            tokenB.address
+          );
+
+          const amount0Out =
+            sortedTokenA === ethers.utils.getAddress(tokenB.address)
+              ? 0
+              : amountOut;
+          const amount1Out =
+            sortedTokenA === ethers.utils.getAddress(tokenB.address)
+              ? amountOut
+              : 0;
 
           await volatilePair
             .connect(alice)
@@ -1447,20 +1474,18 @@ describe("Pair", () => {
         volatilePair.reserve1CumulativeLast(),
       ]);
 
-      const helper = (await deploy("Helper")) as Helper;
-
       const [token0Address] = await helper.sortTokens(
         tokenA.address,
         tokenB.address
       );
 
       const reserve0 =
-        tokenA.address === token0Address
+        ethers.utils.getAddress(tokenA.address) === token0Address
           ? parseEther("1000")
           : parseEther("500");
 
       const reserve1 =
-        tokenA.address === token0Address
+        ethers.utils.getAddress(tokenA.address) === token0Address
           ? parseEther("500")
           : parseEther("1000");
 

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.13;
+pragma solidity 0.8.15;
+
+import "./interfaces/IFees.sol";
 
 import "./lib/Address.sol";
 
@@ -7,7 +9,7 @@ import "./lib/Address.sol";
  *@dev This contract holds all tokens accrued by swap fees by a pair. Each Pair Contract creates a Fees Contract.
  * Only the pair can transfer tokens in and out from it.
  */
-contract Fees {
+contract Fees is IFees {
     using Address for address;
 
     // The pair contract that created it.

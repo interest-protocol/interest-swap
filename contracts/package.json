@@ -1,5 +1,5 @@
 {
-  "name": "@interest-swap/contracts",
+  "name": "@interest-protocol/dex",
   "description": "Core contracts for Interest Protocol Swap",
   "version": "1.0.0",
   "publishConfig": {
@@ -20,7 +20,7 @@
     "contracts",
     "DeFi"
   ],
-  "author": "DeFi, Lda <jose@interestprotocol.com>",
+  "author": "Interest Labs Inc. <jose@interestprotocol.com>",
   "license": "MIT",
   "homepage": "https://interestprotocol.com"
 }

@@ -46,7 +46,7 @@ describe("Router", () => {
       await Promise.all([
         ethers.getSigners(),
         multiDeploy(
-          ["Factory", "ERC20", "ERC20", "ERC20", "wnt"],
+          ["Factory", "ERC20", "ERC20", "ERC20", "WNT"],
           [[], ["TokenA", "TA"], ["TokenB", "TB"], ["TokenC", "TC"], []]
         ),
       ]);
@@ -84,7 +84,7 @@ describe("Router", () => {
     ]);
   });
 
-  const getTokenAwntContract = async () => {
+  const getTokenAWNTContract = async () => {
     const pairAddress = await router.pairFor(
       tokenA.address,
       wnt.address,
@@ -843,13 +843,13 @@ describe("Router", () => {
       ).to.be.revertedWith("Router: Failed to transferFrom");
     });
 
-    it("reverts if the recipient cannot receive BNB", async () => {
+    it("reverts if the recipient cannot receive WNT", async () => {
       const brokenBNBReceiver: BrokenBNBReceiver = await deploy(
         "BrokenBNBReceiver",
         []
       );
 
-      const pair = await getTokenAwntContract();
+      const pair = await getTokenAWNTContract();
 
       await Promise.all([
         wnt.connect(alice).transfer(pair.address, parseEther("10")),
@@ -861,7 +861,7 @@ describe("Router", () => {
 
       await pair.mint(alice.address);
 
-      const amountwntOptimal = quoteLiquidity(
+      const amountWNTOptimal = quoteLiquidity(
         parseEther("2"),
         parseEther("25"),
         parseEther("10")
@@ -879,13 +879,13 @@ describe("Router", () => {
             0,
             brokenBNBReceiver.address,
             ethers.constants.MaxUint256,
-            { value: amountwntOptimal.add(parseEther("1")) }
+            { value: amountWNTOptimal.add(parseEther("1")) }
           )
       ).to.revertedWith("Router: NT transfer failed");
     });
 
     it("adds Native Token liquidity", async () => {
-      const pair = await getTokenAwntContract();
+      const pair = await getTokenAWNTContract();
 
       expect(await pair.balanceOf(alice.address)).to.be.equal(0);
 
@@ -1020,7 +1020,7 @@ describe("Router", () => {
     });
 
     it("removes Native Token liquidity", async () => {
-      const pair = await getTokenAwntContract();
+      const pair = await getTokenAWNTContract();
 
       await Promise.all([
         wnt.connect(alice).transfer(pair.address, parseEther("9")),
@@ -1229,7 +1229,7 @@ describe("Router", () => {
 
   describe("function: removeLiquidityNativeTokenWithPermit", () => {
     it("removes liquidity with  permit without max allowance", async () => {
-      const pair = await getTokenAwntContract();
+      const pair = await getTokenAWNTContract();
 
       // make sure we have no allowance
       await pair.connect(alice).approve(router.address, 0);
@@ -1312,7 +1312,7 @@ describe("Router", () => {
     });
 
     it("removes liquidity with  permit with max allowance", async () => {
-      const pair = await getTokenAwntContract();
+      const pair = await getTokenAWNTContract();
 
       // make sure we have no allowance
       await pair.connect(alice).approve(router.address, 0);

@@ -1,34 +1,26 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.13;
+pragma solidity 0.8.15;
 
-import "./interfaces/IWBNB.sol";
+import "./interfaces/IERC20.sol";
 import "./interfaces/IFactory.sol";
 import "./interfaces/IPair.sol";
-import "./interfaces/IERC20.sol";
+import "./interfaces/IRouter.sol";
+import "./interfaces/IWNT.sol";
 
+import {Route, Amount} from "./lib/DataTypes.sol";
 import "./lib/Math.sol";
 
-struct Route {
-    address from;
-    address to;
-}
-
-struct Amount {
-    uint256 amount;
-    bool stable;
-}
-
-contract Router {
+contract Router is IRouter {
     address public immutable factory;
     //solhint-disable-next-line var-name-mixedcase
-    IWBNB public immutable WBNB;
+    IWNT public immutable WNT;
     uint256 private constant MINIMUM_LIQUIDITY = 1000;
     bytes32 private immutable pairCodeHash;
 
-    constructor(address _factory, IWBNB wbnb) {
+    constructor(address _factory, IWNT wnt) {
         factory = _factory;
         pairCodeHash = IFactory(_factory).pairCodeHash();
-        WBNB = wbnb;
+        WNT = wnt;
     }
 
     modifier ensure(uint256 deadline) {
@@ -38,7 +30,7 @@ contract Router {
     }
 
     receive() external payable {
-        assert(msg.sender == address(WBNB)); // only accept BNB from the WBNB contract
+        assert(msg.sender == address(WNT)); // only accept native token from the Wrapped Native contract
     }
 
     // sorts tokens
@@ -278,12 +270,12 @@ contract Router {
         liquidity = IPair(pair).mint(to);
     }
 
-    function addLiquidityBNB(
+    function addLiquidityNativeToken(
         address token,
         bool stable,
         uint256 amountTokenDesired,
         uint256 amountTokenMin,
-        uint256 amountBNBMin,
+        uint256 amountNativeTokenMin,
         address to,
         uint256 deadline
     )
@@ -292,30 +284,30 @@ contract Router {
         ensure(deadline)
         returns (
             uint256 amountToken,
-            uint256 amountWBNB,
+            uint256 amountNativeToken,
             uint256 liquidity
         )
     {
-        (amountToken, amountWBNB) = _addLiquidity(
+        (amountToken, amountNativeToken) = _addLiquidity(
             token,
-            address(WBNB),
+            address(WNT),
             stable,
             amountTokenDesired,
             msg.value,
             amountTokenMin,
-            amountBNBMin
+            amountNativeTokenMin
         );
-        address pair = pairFor(token, address(WBNB), stable);
+        address pair = pairFor(token, address(WNT), stable);
         _safeTransferFrom(token, msg.sender, pair, amountToken);
 
-        WBNB.deposit{value: amountWBNB}();
-        assert(WBNB.transfer(pair, amountWBNB));
+        WNT.deposit{value: amountNativeToken}();
+        assert(WNT.transfer(pair, amountNativeToken));
 
         liquidity = IPair(pair).mint(to);
 
         // refund dust eth, if any
-        if (msg.value > amountWBNB)
-            _safeTransferBNB(msg.sender, msg.value - amountWBNB);
+        if (msg.value > amountNativeToken)
+            _safeTransferNativeToken(msg.sender, msg.value - amountNativeToken);
     }
 
     function removeLiquidity(
@@ -341,28 +333,32 @@ contract Router {
         require(amountB >= amountBMin, "Router: Insufficient b amount");
     }
 
-    function removeLiquidityBNB(
+    function removeLiquidityNativeToken(
         address token,
         bool stable,
         uint256 liquidity,
         uint256 amountTokenMin,
-        uint256 amountBNBMin,
+        uint256 amountNativeTokenMin,
         address to,
         uint256 deadline
-    ) public ensure(deadline) returns (uint256 amountToken, uint256 amountBNB) {
-        (amountToken, amountBNB) = removeLiquidity(
+    )
+        public
+        ensure(deadline)
+        returns (uint256 amountToken, uint256 amountNativeToken)
+    {
+        (amountToken, amountNativeToken) = removeLiquidity(
             token,
-            address(WBNB),
+            address(WNT),
             stable,
             liquidity,
             amountTokenMin,
-            amountBNBMin,
+            amountNativeTokenMin,
             address(this),
             deadline
         );
         _safeTransfer(token, to, amountToken);
-        WBNB.withdraw(amountBNB);
-        _safeTransferBNB(to, amountBNB);
+        WNT.withdraw(amountNativeToken);
+        _safeTransferNativeToken(to, amountNativeToken);
     }
 
     function removeLiquidityWithPermit(
@@ -403,20 +399,20 @@ contract Router {
         );
     }
 
-    function removeLiquidityBNBWithPermit(
+    function removeLiquidityNativeTokenWithPermit(
         address token,
         bool stable,
         uint256 liquidity,
         uint256 amountTokenMin,
-        uint256 amountBNBMin,
+        uint256 amountNativeTokenMin,
         address to,
         uint256 deadline,
         bool approveMax,
         uint8 v,
         bytes32 r,
         bytes32 s
-    ) external returns (uint256 amountToken, uint256 amountBNB) {
-        address pair = pairFor(token, address(WBNB), stable);
+    ) external returns (uint256 amountToken, uint256 amountNativeToken) {
+        address pair = pairFor(token, address(WNT), stable);
 
         IPair(pair).permit(
             msg.sender,
@@ -428,12 +424,12 @@ contract Router {
             s
         );
 
-        (amountToken, amountBNB) = removeLiquidityBNB(
+        (amountToken, amountNativeToken) = removeLiquidityNativeToken(
             token,
             stable,
             liquidity,
             amountTokenMin,
-            amountBNBMin,
+            amountNativeTokenMin,
             to,
             deadline
         );
@@ -460,22 +456,22 @@ contract Router {
         _swap(amounts, routes, to);
     }
 
-    function swapExactBNBForTokens(
+    function swapExactNativeTokenForTokens(
         uint256 amountOutMin,
         Route[] calldata routes,
         address to,
         uint256 deadline
     ) external payable ensure(deadline) returns (Amount[] memory amounts) {
-        require(routes[0].from == address(WBNB), "Router: wrong route");
+        require(routes[0].from == address(WNT), "Router: wrong route");
         amounts = getAmountsOut(msg.value, routes);
         require(
             amounts[amounts.length - 1].amount >= amountOutMin,
             "Router: Insufficient output"
         );
 
-        WBNB.deposit{value: msg.value}();
+        WNT.deposit{value: msg.value}();
         assert(
-            WBNB.transfer(
+            WNT.transfer(
                 pairFor(routes[0].from, routes[0].to, amounts[1].stable),
                 msg.value
             )
@@ -483,7 +479,7 @@ contract Router {
         _swap(amounts, routes, to);
     }
 
-    function swapExactTokensForBNB(
+    function swapExactTokensForNativeToken(
         uint256 amountIn,
         uint256 amountOutMin,
         Route[] calldata routes,
@@ -491,7 +487,7 @@ contract Router {
         uint256 deadline
     ) external ensure(deadline) returns (Amount[] memory amounts) {
         require(
-            routes[routes.length - 1].to == address(WBNB),
+            routes[routes.length - 1].to == address(WNT),
             "Router: wrong route"
         );
         amounts = getAmountsOut(amountIn, routes);
@@ -506,8 +502,8 @@ contract Router {
             amountIn
         );
         _swap(amounts, routes, address(this));
-        WBNB.withdraw(amounts[amounts.length - 1].amount);
-        _safeTransferBNB(to, amounts[amounts.length - 1].amount);
+        WNT.withdraw(amounts[amounts.length - 1].amount);
+        _safeTransferNativeToken(to, amounts[amounts.length - 1].amount);
     }
 
     // **** SWAP ****
@@ -603,10 +599,10 @@ contract Router {
         );
     }
 
-    function _safeTransferBNB(address to, uint256 value) private {
+    function _safeTransferNativeToken(address to, uint256 value) private {
         //solhint-disable-next-line avoid-low-level-calls
         (bool success, ) = to.call{value: value}("");
-        require(success, "Router: BNB transfer failed");
+        require(success, "Router: NT transfer failed");
     }
 
     // given some amount of an asset and pair reserves, returns the optimal amount of reserves to add for the token asset

@@ -6,7 +6,8 @@
   "scripts": {
     "coverage": "npx hardhat coverage --testfiles './test/**.ts'",
     "clean": "npx hardhat clean && rimraf cache && rimraf artifacts",
-    "compile": "npx hardhat compile"
+    "compile": "npx hardhat compile",
+    "publish": "npm publish contracts --access public"
   },
   "keywords": [],
   "author": "",

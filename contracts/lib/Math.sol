@@ -2,21 +2,21 @@
 pragma solidity 0.8.15;
 
 library Math {
-    // Base Mantissa of all numbers in Interest Protocol
-    uint256 private constant BASE = 1e18;
+    // Common scalar for ERC20 and native assets
+    uint256 private constant SCALAR = 1e18;
 
     /**
      * @dev Function ensures that the return value keeps the right mantissa
      */
-    function bmul(uint256 x, uint256 y) internal pure returns (uint256) {
-        return mulDiv(x, y, BASE);
+    function mul(uint256 x, uint256 y) internal pure returns (uint256) {
+        return mulDiv(x, y, SCALAR);
     }
 
     /**
      * @dev Function ensures that the return value keeps the right mantissa
      */
-    function bdiv(uint256 x, uint256 y) internal pure returns (uint256) {
-        return mulDiv(x, BASE, y);
+    function div(uint256 x, uint256 y) internal pure returns (uint256) {
+        return mulDiv(x, SCALAR, y);
     }
 
     function min(uint256 x, uint256 y) internal pure returns (uint256 z) {

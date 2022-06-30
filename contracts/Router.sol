@@ -12,17 +12,16 @@ import "./lib/Errors.sol";
 import "./lib/Math.sol";
 
 contract Router is IRouter {
+    bytes32 private immutable pairCodeHash;
+
     address public immutable factory;
     //solhint-disable-next-line var-name-mixedcase
     IWNT public immutable WNT;
     uint256 private constant MINIMUM_LIQUIDITY = 1000;
-    bytes32 private immutable stablePairCodeHash;
-    bytes32 private immutable volatilePairCodeHash;
 
     constructor(address _factory, IWNT wnt) {
         factory = _factory;
-        stablePairCodeHash = IFactory(_factory).stablePairCodeHash();
-        volatilePairCodeHash = IFactory(_factory).volatilePairCodeHash();
+        pairCodeHash = IFactory(_factory).pairCodeHash();
         WNT = wnt;
     }
 
@@ -64,7 +63,7 @@ contract Router is IRouter {
                             hex"ff",
                             factory,
                             keccak256(abi.encodePacked(token0, token1, stable)),
-                            stable ? stablePairCodeHash : volatilePairCodeHash // init code hash
+                            pairCodeHash // init code hash
                         )
                     )
                 )
@@ -123,26 +122,28 @@ contract Router is IRouter {
         if (routes.length == 0) revert InvalidPath();
         if (amount == 0) revert ZeroAmount();
 
-        amounts = new Amount[](uncheckedInc(routes.length));
+        unchecked {
+            amounts = new Amount[](routes.length + 1);
 
-        amounts[0] = Amount(amount, false);
+            amounts[0] = Amount(amount, false);
 
-        for (uint256 i = 0; i < routes.length; uncheckedInc(i)) {
-            (address volatilePair, address stablePair) = getPairs(
-                routes[i].from,
-                routes[i].to
-            );
-
-            if (
-                IFactory(factory).isPair(volatilePair) ||
-                IFactory(factory).isPair(stablePair)
-            ) {
-                amounts[uncheckedInc(i)] = _getBestAmount(
+            for (uint256 i; i < routes.length; i++) {
+                (address volatilePair, address stablePair) = getPairs(
                     routes[i].from,
-                    amounts[i].amount,
-                    stablePair,
-                    volatilePair
+                    routes[i].to
                 );
+
+                if (
+                    IFactory(factory).isPair(volatilePair) ||
+                    IFactory(factory).isPair(stablePair)
+                ) {
+                    amounts[i + 1] = _getBestAmount(
+                        routes[i].from,
+                        amounts[i].amount,
+                        stablePair,
+                        volatilePair
+                    );
+                }
             }
         }
     }
@@ -378,9 +379,7 @@ contract Router is IRouter {
         bytes32 r,
         bytes32 s
     ) external returns (uint256 amountA, uint256 amountB) {
-        address pair = pairFor(tokenA, tokenB, stable);
-
-        IPair(pair).permit(
+        IPair(pairFor(tokenA, tokenB, stable)).permit(
             msg.sender,
             address(this),
             approveMax ? type(uint256).max : liquidity,
@@ -415,9 +414,7 @@ contract Router is IRouter {
         bytes32 r,
         bytes32 s
     ) external returns (uint256 amountToken, uint256 amountNativeToken) {
-        address pair = pairFor(token, address(WNT), stable);
-
-        IPair(pair).permit(
+        IPair(pairFor(token, address(WNT), stable)).permit(
             msg.sender,
             address(this),
             approveMax ? type(uint256).max : liquidity,
@@ -445,18 +442,20 @@ contract Router is IRouter {
         address to,
         uint256 deadline
     ) external ensure(deadline) returns (Amount[] memory amounts) {
-        amounts = getAmountsOut(amountIn, routes);
+        unchecked {
+            amounts = getAmountsOut(amountIn, routes);
 
-        if (amountOutMin > amounts[uncheckedDec(amounts.length)].amount)
-            revert InsufficientOutput();
+            if (amountOutMin > amounts[amounts.length - 1].amount)
+                revert InsufficientOutput();
 
-        _safeTransferFrom(
-            routes[0].from,
-            msg.sender,
-            pairFor(routes[0].from, routes[0].to, amounts[1].stable),
-            amountIn
-        );
-        _swap(amounts, routes, to);
+            _safeTransferFrom(
+                routes[0].from,
+                msg.sender,
+                pairFor(routes[0].from, routes[0].to, amounts[1].stable),
+                amountIn
+            );
+            _swap(amounts, routes, to);
+        }
     }
 
     function swapExactNativeTokenForTokens(
@@ -465,21 +464,23 @@ contract Router is IRouter {
         address to,
         uint256 deadline
     ) external payable ensure(deadline) returns (Amount[] memory amounts) {
-        if (routes[0].from != address(WNT)) revert InvalidRoute();
+        unchecked {
+            if (routes[0].from != address(WNT)) revert InvalidRoute();
 
-        amounts = getAmountsOut(msg.value, routes);
+            amounts = getAmountsOut(msg.value, routes);
 
-        if (amountOutMin > amounts[uncheckedDec(amounts.length)].amount)
-            revert InsufficientOutput();
+            if (amountOutMin > amounts[amounts.length - 1].amount)
+                revert InsufficientOutput();
 
-        WNT.deposit{value: msg.value}();
-        assert(
-            WNT.transfer(
-                pairFor(routes[0].from, routes[0].to, amounts[1].stable),
-                msg.value
-            )
-        );
-        _swap(amounts, routes, to);
+            WNT.deposit{value: msg.value}();
+            assert(
+                WNT.transfer(
+                    pairFor(routes[0].from, routes[0].to, amounts[1].stable),
+                    msg.value
+                )
+            );
+            _swap(amounts, routes, to);
+        }
     }
 
     function swapExactTokensForNativeToken(
@@ -489,35 +490,25 @@ contract Router is IRouter {
         address to,
         uint256 deadline
     ) external ensure(deadline) returns (Amount[] memory amounts) {
-        if (routes[uncheckedDec(routes.length)].to != address(WNT))
-            revert InvalidRoute();
-
-        uint256 lastIndex = uncheckedDec(amounts.length);
-
-        amounts = getAmountsOut(amountIn, routes);
-        if (amountOutMin > amounts[lastIndex].amount)
-            revert InsufficientOutput();
-
-        _safeTransferFrom(
-            routes[0].from,
-            msg.sender,
-            pairFor(routes[0].from, routes[0].to, amounts[1].stable),
-            amountIn
-        );
-        _swap(amounts, routes, address(this));
-        WNT.withdraw(amounts[lastIndex].amount);
-        _safeTransferNativeToken(to, amounts[lastIndex].amount);
-    }
-
-    function uncheckedInc(uint256 x) private pure returns (uint256) {
         unchecked {
-            return x + 1;
-        }
-    }
+            if (routes[routes.length - 1].to != address(WNT))
+                revert InvalidRoute();
 
-    function uncheckedDec(uint256 x) private pure returns (uint256) {
-        unchecked {
-            return x - 1;
+            amounts = getAmountsOut(amountIn, routes);
+            uint256 lastIndex = amounts.length - 1;
+
+            if (amountOutMin > amounts[lastIndex].amount)
+                revert InsufficientOutput();
+
+            _safeTransferFrom(
+                routes[0].from,
+                msg.sender,
+                pairFor(routes[0].from, routes[0].to, amounts[1].stable),
+                amountIn
+            );
+            _swap(amounts, routes, address(this));
+            WNT.withdraw(amounts[lastIndex].amount);
+            _safeTransferNativeToken(to, amounts[lastIndex].amount);
         }
     }
 
@@ -528,30 +519,29 @@ contract Router is IRouter {
         Route[] memory routes,
         address _to
     ) private {
-        for (uint256 i = 0; i < routes.length; uncheckedInc(i)) {
-            (address token0, ) = sortTokens(routes[i].from, routes[i].to);
+        unchecked {
+            for (uint256 i; i < routes.length; i++) {
+                (address token0, ) = sortTokens(routes[i].from, routes[i].to);
 
-            uint256 amountOut = amounts[uncheckedInc(i)].amount;
+                uint256 amountOut = amounts[i + 1].amount;
 
-            (uint256 amount0Out, uint256 amount1Out) = routes[i].from == token0
-                ? (uint256(0), amountOut)
-                : (amountOut, uint256(0));
+                (uint256 amount0Out, uint256 amount1Out) = routes[i].from ==
+                    token0
+                    ? (uint256(0), amountOut)
+                    : (amountOut, uint256(0));
 
-            address to = i < uncheckedDec(routes.length)
-                ? pairFor(
-                    routes[uncheckedInc(i)].from,
-                    routes[uncheckedInc(i)].to,
-                    amounts[uncheckedInc(uncheckedInc(i))].stable
-                )
-                : _to;
+                address to = i < routes.length - 1
+                    ? pairFor(
+                        routes[i + 1].from,
+                        routes[i + 1].to,
+                        amounts[i + 2].stable
+                    )
+                    : _to;
 
-            IPair(
-                pairFor(
-                    routes[i].from,
-                    routes[i].to,
-                    amounts[uncheckedInc(i)].stable
-                )
-            ).swap(amount0Out, amount1Out, to, new bytes(0));
+                IPair(
+                    pairFor(routes[i].from, routes[i].to, amounts[i + 1].stable)
+                ).swap(amount0Out, amount1Out, to, new bytes(0));
+            }
         }
     }
 
@@ -564,16 +554,14 @@ contract Router is IRouter {
         uint256 amountStable;
         uint256 amountVolatile;
 
-        if (IFactory(factory).isPair(stablePair)) {
+        if (IFactory(factory).isPair(stablePair))
             amountStable = IPair(stablePair).getAmountOut(tokenIn, amountIn);
-        }
 
-        if (IFactory(factory).isPair(volatilePair)) {
+        if (IFactory(factory).isPair(volatilePair))
             amountVolatile = IPair(volatilePair).getAmountOut(
                 tokenIn,
                 amountIn
             );
-        }
 
         return
             amountStable > amountVolatile

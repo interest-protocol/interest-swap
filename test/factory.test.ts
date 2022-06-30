@@ -30,7 +30,7 @@ describe("Factory", () => {
     expect(await factory.governor()).to.be.equal(owner.address);
   });
 
-  it("returns the total number of pairs deployyed by the factory", async () => {
+  it("returns the total number of pairs deployed by the factory", async () => {
     expect(await factory.allPairsLength()).to.be.equal(0);
     await factory.createPair(tokenA.address, tokenB.address, false);
     expect(await factory.allPairsLength()).to.be.equal(1);
@@ -38,21 +38,21 @@ describe("Factory", () => {
     expect(await factory.allPairsLength()).to.be.equal(2);
   });
 
-  it("returns the hash of the creation code of the Pair contract", async () => {
-    const pairContract = await ethers.getContractFactory("Pair");
-    const hash = ethers.utils.solidityKeccak256(
+  it("returns the hash of the creation code of a VolatilePair and StablePair", async () => {
+    const pairFactory = await ethers.getContractFactory("Pair");
+    const pairHash = ethers.utils.solidityKeccak256(
       ["bytes"],
-      [pairContract.bytecode]
+      [pairFactory.bytecode]
     );
 
-    expect(await factory.pairCodeHash()).to.be.equal(hash);
+    expect(await factory.pairCodeHash()).to.be.equal(pairHash);
   });
 
   describe("function: setFeeTo", () => {
     it("reverts if it is not called by the governor", async () => {
       await expect(
         factory.connect(alice).setFeeTo(owner.address)
-      ).to.be.revertedWith("Factory: Unauthorized");
+      ).to.be.revertedWith("Unauthorized()");
     });
     it("sets a new feeTo address", async () => {
       expect(await factory.feeTo()).to.be.equal(ethers.constants.AddressZero);
@@ -68,16 +68,16 @@ describe("Factory", () => {
     it("reverts if it is not called by the governor", async () => {
       await expect(
         factory.connect(alice).setGovernor(alice.address)
-      ).to.be.revertedWith("Factory: Unauthorized");
+      ).to.be.revertedWith("Unauthorized()");
     });
     it("reverts if the new governor is the zero address", async () => {
       await Promise.all([
         expect(
           factory.connect(owner).setGovernor(ethers.constants.AddressZero)
-        ).to.be.revertedWith("Factory: Unauthorized"),
+        ).to.be.revertedWith("Unauthorized()"),
         expect(
           factory.connect(alice).setGovernor(ethers.constants.AddressZero)
-        ).to.be.revertedWith("Factory: Unauthorized"),
+        ).to.be.revertedWith("Unauthorized()"),
       ]);
     });
     it("sets a new governor", async () => {
@@ -99,24 +99,24 @@ describe("Factory", () => {
             ethers.constants.AddressZero,
             false
           )
-        ).to.be.revertedWith("Factory: Zero address"),
+        ).to.be.revertedWith("ZeroAddress()"),
         expect(
           factory.createPair(
             ethers.constants.AddressZero,
             tokenA.address,
             false
           )
-        ).to.be.revertedWith("Factory: Zero address"),
+        ).to.be.revertedWith("ZeroAddress()"),
         expect(
           factory.createPair(tokenA.address, tokenA.address, false)
-        ).to.be.revertedWith("Factory: Invalid"),
+        ).to.be.revertedWith("SameAddress()"),
       ]);
 
       await factory.createPair(tokenA.address, tokenB.address, false);
 
       await expect(
         factory.createPair(tokenA.address, tokenB.address, false)
-      ).to.be.revertedWith("Factory: Already deployed");
+      ).to.be.revertedWith("AlreadyDeployed()");
     });
 
     it("deploys a new pair", async () => {
@@ -174,4 +174,4 @@ describe("Factory", () => {
       expect(getPairB2).to.be.equal(predictedAddress);
     });
   });
-});
+}).timeout(20_000);

@@ -12,7 +12,7 @@ import "./lib/Address.sol";
 
 //solhint-disable var-name-mixedcase
 //solhint-disable not-rely-on-time
-abstract contract Pair is IPair {
+contract Pair is IPair {
     /*//////////////////////////////////////////////////////////////
                               Libs
     //////////////////////////////////////////////////////////////*/
@@ -44,10 +44,6 @@ abstract contract Pair is IPair {
     bytes32 private constant _TYPE_HASH =
         keccak256(
             "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
-        );
-    bytes32 private constant _PERMIT_TYPEHASH =
-        keccak256(
-            "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
         );
 
     bytes32 private immutable _CACHED_DOMAIN_SEPARATOR;
@@ -97,7 +93,7 @@ abstract contract Pair is IPair {
     // Settings for the TWAP
     uint256 private constant WINDOW = 15 minutes;
     uint256 private constant GRANULARITY = 5; // TWAP updates every 3 minutes
-    uint256 private constant PERIOD_SIZE = WINDOW / GRANULARITY;
+    uint256 private constant PERIOD_SIZE = 3 minutes;
 
     // Reserve observations for the TWAP
     Observation[] public observations;
@@ -109,61 +105,73 @@ abstract contract Pair is IPair {
         // Pair will be deployed by a factory
         factory = msg.sender;
 
-        // Save init data in memory to save gas
-        (address _token0, address _token1, bool _stable) = IFactory(msg.sender)
-            .getInitializable();
+        // Save init data to storage to save gas due to yul optimizer
+        (token0, token1, stable) = IFactory(msg.sender).getInitializable();
 
-        // Update the global state
-        (token0, token1, stable) = (_token0, _token1, _stable);
+        // Save gas
+        uint256 fee;
 
-        // Set the swap fee. 0.05% for stable swaps and 0.3% for volatile swaps
-        swapFee = _stable ? 0.0005e18 : 0.003e18;
+        string memory token0Symbol = token0.safeSymbol();
+        string memory token1Symbol = token1.safeSymbol();
 
-        // e.g. Int Stable LP USDC/USDT
-        string memory _name = string(
-            abi.encodePacked(
-                _stable ? "Int Stable LP - " : "Int Volatile LP - ",
-                _token0.safeSymbol(),
-                "/",
-                _token1.safeSymbol()
-            )
-        );
+        if (stable) {
+            // e.g. Int Stable LP USDC/USDT
+            name = string(
+                abi.encodePacked(
+                    "Int Stable LP - ",
+                    token0Symbol,
+                    "/",
+                    token1Symbol
+                )
+            );
+            fee = 0.0005e18;
+            // e.g. vILP-USDC/USDT
+            symbol = string(
+                abi.encodePacked("sILP-", token0Symbol, "/", token1Symbol)
+            );
+        } else {
+            // e.g. Int Stable LP USDC/USDT
+            name = string(
+                abi.encodePacked(
+                    "Int Volatile LP - ",
+                    token0Symbol,
+                    "/",
+                    token1Symbol
+                )
+            );
 
-        // Set the name and symbol of the LP token
-        name = _name;
+            fee = 0.003e18;
 
-        // e.g. vILP-USDC/USDT
-        symbol = string(
-            abi.encodePacked(
-                _stable ? "sILP-" : "vILP-",
-                _token0.safeSymbol(),
-                "/",
-                _token1.safeSymbol()
-            )
-        );
-
-        // Set decimals in terms of 1 unit
-        decimals0 = 10**_token0.safeDecimals();
-        decimals1 = 10**_token1.safeDecimals();
-
-        // populate the observations array with empty observations
-        for (
-            uint256 i = observations.length;
-            i < GRANULARITY;
-            uncheckedInc(i)
-        ) {
-            observations.push();
+            // e.g. vILP-USDC/USDT
+            symbol = string(
+                abi.encodePacked("vILP-", token0Symbol, "/", token1Symbol)
+            );
         }
 
-        bytes32 hashedName = keccak256(bytes(name));
-        bytes32 hashedVersion = keccak256(bytes("1"));
-        _HASHED_NAME = hashedName;
-        _HASHED_VERSION = hashedVersion;
+        // Set the swap fee. 0.05% for stable swaps and 0.3% for volatile swaps
+        swapFee = fee;
+
+        unchecked {
+            // Set decimals in terms of 1 unit
+            decimals0 = 10**token0.safeDecimals();
+            decimals1 = 10**token1.safeDecimals();
+        }
+
+        // Need to call {GRANULATIRY times}
+        // populate the observations array with empty observations
+        observations.push();
+        observations.push();
+        observations.push();
+        observations.push();
+        observations.push();
+
+        _HASHED_NAME = keccak256(bytes(name));
+        _HASHED_VERSION = keccak256(bytes("1"));
         _CACHED_CHAIN_ID = block.chainid;
         _CACHED_DOMAIN_SEPARATOR = _computeDomainSeparator(
             _TYPE_HASH,
-            hashedName,
-            hashedVersion
+            _HASHED_NAME,
+            _HASHED_VERSION
         );
     }
 
@@ -221,7 +229,9 @@ abstract contract Pair is IPair {
                     DOMAIN_SEPARATOR(),
                     keccak256(
                         abi.encode(
-                            _PERMIT_TYPEHASH,
+                            keccak256(
+                                "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+                            ),
                             owner,
                             spender,
                             value,
@@ -365,13 +375,15 @@ abstract contract Pair is IPair {
     function observationIndexOf(uint256 timestamp)
         public
         pure
-        returns (uint256 index)
+        returns (uint256)
     {
         // Split the total time by the period size to get a time slot.
         // If {WINDOW_SIZE} is 24 hours, {GRANULARITY} is 4 hours and {PERIOD_SIZE} is 6 hours.
         // E.g. In a `timestamp` of 72 hours, if we divide by a period size of 6 would give us 12.
         // 12 % 4 would give us index 0.
-        return (timestamp / PERIOD_SIZE) % GRANULARITY;
+        unchecked {
+            return (timestamp / PERIOD_SIZE) % GRANULARITY;
+        }
     }
 
     /**
@@ -393,19 +405,16 @@ abstract contract Pair is IPair {
 
         // Get the last recorded reserves by the pair.
         // if time has elapsed since the last update on the pair, mock the accumulated price values
-        (
-            uint256 _reserve0,
-            uint256 _reserve1,
-            uint256 _blockTimestampLast
-        ) = getReserves();
+
+        uint256 _blockTimestampLast = blockTimestampLast;
 
         if (_blockTimestampLast != blockTimestamp) {
             // overflow is desired
             unchecked {
                 uint256 timeElapsed = blockTimestamp - _blockTimestampLast;
 
-                reserve0Cumulative += _reserve0 * timeElapsed;
-                reserve1Cumulative += _reserve1 * timeElapsed;
+                reserve0Cumulative += reserve0 * timeElapsed;
+                reserve1Cumulative += reserve1 * timeElapsed;
             }
         }
     }
@@ -432,7 +441,6 @@ abstract contract Pair is IPair {
 
         unchecked {
             timeElapsed = block.timestamp - firstObservation.timestamp;
-
             // Only happens if the pair has low trading activity.
             if (timeElapsed > WINDOW) revert MissingObservation();
 
@@ -509,7 +517,7 @@ abstract contract Pair is IPair {
      * @dev It returns the last record of the reserves held by this pair.
      */
     function getReserves()
-        public
+        external
         view
         returns (
             uint256,
@@ -538,7 +546,7 @@ abstract contract Pair is IPair {
      * - Assumes the user has sent enough tokens beforehand.
      */
     function mint(address to) external lock returns (uint256 liquidity) {
-        // Save current reserves in memory to save gas
+        // Save current to {_sync} after changes
         (uint256 _reserve0, uint256 _reserve1) = (reserve0, reserve1);
 
         // Get current balance in the contract.
@@ -700,22 +708,14 @@ abstract contract Pair is IPair {
             if (
                 _k(_reserve0, _reserve1) >
                 _k(
-                    uncheckedSubSwapFee(_balance0),
-                    uncheckedSubSwapFee(_balance1)
+                    _balance0 - amount0In.mul(swapFee),
+                    _balance1 - amount1In.mul(swapFee)
                 )
             ) revert K();
-
-            // Update the observations and the reserves.
-            _sync(_balance0, _balance1, _reserve0, _reserve1);
-            emit Swap(
-                msg.sender,
-                amount0In,
-                amount1In,
-                amount0Out,
-                amount1Out,
-                to
-            );
         }
+        // Update the observations and the reserves.
+        _sync(_balance0, _balance1, _reserve0, _reserve1);
+        emit Swap(msg.sender, amount0In, amount1In, amount0Out, amount1Out, to);
     }
 
     /**
@@ -728,9 +728,8 @@ abstract contract Pair is IPair {
      * Non-reentrant
      */
     function skim(address to) external lock {
-        (address _token0, address _token1) = (token0, token1);
-        _token0.safeTransfer(to, _token0.currentBalance() - reserve0);
-        _token1.safeTransfer(to, _token1.currentBalance() - reserve1);
+        token0.safeTransfer(to, token0.currentBalance() - reserve0);
+        token1.safeTransfer(to, token1.currentBalance() - reserve1);
     }
 
     /**
@@ -761,12 +760,11 @@ abstract contract Pair is IPair {
         view
         returns (uint256)
     {
-        (uint256 _reserve0, uint256 _reserve1) = (reserve0, reserve1);
         unchecked {
             // Remove the fee
             amountIn = uncheckedSubSwapFee(amountIn); // remove fee from amount received
         }
-        return _computeAmountOut(amountIn, tokenIn, _reserve0, _reserve1);
+        return _computeAmountOut(amountIn, tokenIn, reserve0, reserve1);
     }
 
     // From uniswap
@@ -779,7 +777,7 @@ abstract contract Pair is IPair {
         feeOn = feeTo != address(0);
         uint256 _kLast = kLast; // gas savings
         if (feeOn) {
-            if (_kLast != 0) {
+            if (_kLast > 0) {
                 uint256 rootK = Math.sqrt(_k(_reserve0, _reserve1));
                 uint256 rootKLast = Math.sqrt(_kLast);
                 if (rootK > rootKLast) {
@@ -789,7 +787,7 @@ abstract contract Pair is IPair {
                     if (liquidity > 0) _mint(feeTo, liquidity);
                 }
             }
-        } else if (_kLast != 0) {
+        } else if (_kLast > 0) {
             kLast = 0;
         }
     }
@@ -914,15 +912,98 @@ abstract contract Pair is IPair {
     }
 
     /*//////////////////////////////////////////////////////////////
-                        Children Logic
+                            K Invariant LOGIC
     //////////////////////////////////////////////////////////////*/
 
+    // Taken from https://github.com/solidlyexchange/solidly/blob/master/contracts/BaseV1-core.sol
+    function _k(uint256 x, uint256 y) private view returns (uint256) {
+        if (!stable) return x * y; // xy >= k
+
+        uint256 _x = (x * 1e18) / decimals0;
+        uint256 _y = (y * 1e18) / decimals1;
+        uint256 _a = (_x * _y) / 1e18;
+        uint256 _b = ((_x * _x) / 1e18 + (_y * _y) / 1e18);
+        return (_a * _b) / 1e18; // x3y+y3x >= k
+    }
+
+    // Taken from https://github.com/solidlyexchange/solidly/blob/master/contracts/BaseV1-core.sol
+    function _f(uint256 x0, uint256 y) private pure returns (uint256) {
+        return
+            (x0 * ((((y * y) / 1e18) * y) / 1e18)) /
+            1e18 +
+            (((((x0 * x0) / 1e18) * x0) / 1e18) * y) /
+            1e18;
+    }
+
+    // Taken from https://github.com/solidlyexchange/solidly/blob/master/contracts/BaseV1-core.sol
+    function _d(uint256 x0, uint256 y) private pure returns (uint256) {
+        return
+            (3 * x0 * ((y * y) / 1e18)) /
+            1e18 +
+            ((((x0 * x0) / 1e18) * x0) / 1e18);
+    }
+
+    // Taken from https://github.com/solidlyexchange/solidly/blob/master/contracts/BaseV1-core.sol
+    function _getY(
+        uint256 x0,
+        uint256 xy,
+        uint256 y
+    ) private pure returns (uint256) {
+        for (uint256 i = 0; i < 255; i++) {
+            uint256 yPrev = y;
+            uint256 k = _f(x0, y);
+            if (k < xy) {
+                uint256 dy = ((xy - k) * 1e18) / _d(x0, y);
+                y = y + dy;
+            } else {
+                uint256 dy = ((k - xy) * 1e18) / _d(x0, y);
+                y = y - dy;
+            }
+            if (y > yPrev) {
+                if (y - yPrev <= 1) {
+                    return y;
+                }
+            } else {
+                if (yPrev - y <= 1) {
+                    return y;
+                }
+            }
+        }
+        return y;
+    }
+
+    /**
+     * @dev https://github.com/solidlyexchange/solidly/blob/master/contracts/BaseV1-core.sol
+     *
+     * @param amountIn The number of `tokenIn` being sold
+     * @param tokenIn The token being sold
+     * @param _reserve0 current reserves of token0
+     * @param _reserve1 current reserves of token1
+     * @return uint256 How many tokens of the other tokens were bought
+     */
     function _computeAmountOut(
         uint256 amountIn,
         address tokenIn,
         uint256 _reserve0,
         uint256 _reserve1
-    ) internal view virtual returns (uint256 amountOut);
-
-    function _k(uint256 x, uint256 y) internal view virtual returns (uint256);
+    ) private view returns (uint256) {
+        if (stable) {
+            uint256 xy = _k(_reserve0, _reserve1);
+            _reserve0 = (_reserve0 * 1e18) / decimals0;
+            _reserve1 = (_reserve1 * 1e18) / decimals1;
+            (uint256 reserveA, uint256 reserveB) = tokenIn == token0
+                ? (_reserve0, _reserve1)
+                : (_reserve1, _reserve0);
+            amountIn = tokenIn == token0
+                ? (amountIn * 1e18) / decimals0
+                : (amountIn * 1e18) / decimals1;
+            uint256 y = reserveB - _getY(amountIn + reserveA, xy, reserveB);
+            return (y * (tokenIn == token0 ? decimals1 : decimals0)) / 1e18;
+        } else {
+            (uint256 reserveA, uint256 reserveB) = tokenIn == token0
+                ? (_reserve0, _reserve1)
+                : (_reserve1, _reserve0);
+            return (amountIn * reserveB) / (reserveA + amountIn);
+        }
+    }
 }

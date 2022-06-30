@@ -116,13 +116,13 @@ describe("Router", () => {
       await Promise.all([
         expect(
           router.sortTokens(tokenA.address, tokenA.address)
-        ).to.revertedWith("Router: Same address"),
+        ).to.revertedWith("SameAddress()"),
         expect(
           router.sortTokens(tokenA.address, ethers.constants.AddressZero)
-        ).to.revertedWith("Router: Zero address"),
+        ).to.revertedWith("ZeroAddress()"),
         expect(
           router.sortTokens(ethers.constants.AddressZero, tokenB.address)
-        ).to.revertedWith("Router: Zero address"),
+        ).to.revertedWith("ZeroAddress()"),
       ]);
     });
     it("sorts tokens", async () => {
@@ -276,14 +276,12 @@ describe("Router", () => {
   describe("function: getAmountsOut", () => {
     it("reverts if route is invalid", async () => {
       await Promise.all([
-        expect(router.getAmountsOut(0, [])).to.revertedWith(
-          "Router: invalid path"
-        ),
+        expect(router.getAmountsOut(0, [])).to.revertedWith("InvalidPath()"),
         expect(
           router.getAmountsOut(0, [
             { from: tokenA.address, to: tokenB.address },
           ])
-        ).to.revertedWith("Router: no 0 amount"),
+        ).to.revertedWith("ZeroAmount()"),
       ]);
     });
 
@@ -434,7 +432,7 @@ describe("Router", () => {
           parseEther("1"),
           0
         )
-      ).to.revertedWith("Router: not enough liquidity");
+      ).to.revertedWith("NoLiquidity");
     });
 
     it("handles the case in which there is a pair already", async () => {
@@ -481,7 +479,7 @@ describe("Router", () => {
           0,
           amountBOptimal.sub(parseEther("1"))
         )
-      ).to.revertedWith("Router: no 0 amountA");
+      ).to.revertedWith("ZeroAmount()");
 
       expect(dataOne[0]).to.be.equal(amountADesired);
       expect(dataOne[1]).to.be.equal(amountBOptimal);
@@ -603,7 +601,7 @@ describe("Router", () => {
           alice.address,
           blockTimestamp - 1
         )
-      ).to.revertedWith("Router: Expired");
+      ).to.revertedWith("Expired()");
     });
 
     it("reverts if the parameters are wrong", async () => {
@@ -620,7 +618,7 @@ describe("Router", () => {
             alice.address,
             ethers.constants.MaxUint256
           )
-        ).to.revertedWith("Router: wrong a amounts"),
+        ).to.revertedWith("InvalidAmountA()"),
         expect(
           router.addLiquidity(
             tokenA.address,
@@ -633,7 +631,7 @@ describe("Router", () => {
             alice.address,
             ethers.constants.MaxUint256
           )
-        ).to.revertedWith("Router: wrong b amounts"),
+        ).to.revertedWith("InvalidAmountB()"),
       ]);
     });
 
@@ -723,7 +721,7 @@ describe("Router", () => {
           alice.address,
           ethers.constants.MaxUint256
         )
-      ).to.be.revertedWith("Router: Insufficient amountB");
+      ).to.be.revertedWith("InsufficientAmountB()");
 
       const fail2 = expect(
         router.addLiquidity(
@@ -745,7 +743,7 @@ describe("Router", () => {
           alice.address,
           ethers.constants.MaxUint256
         )
-      ).to.be.revertedWith("Router: Insufficient amountA");
+      ).to.be.revertedWith("InsufficientAmountA()");
 
       await Promise.all([fail1, fail2]);
 
@@ -825,7 +823,7 @@ describe("Router", () => {
             alice.address,
             0
           )
-      ).to.be.revertedWith("Router: Expired");
+      ).to.be.revertedWith("Expired()");
     });
 
     it("reverts if the transferFrom fails", async () => {
@@ -840,7 +838,7 @@ describe("Router", () => {
           ethers.constants.MaxUint256,
           { value: parseEther("10") }
         )
-      ).to.be.revertedWith("Router: Failed to transferFrom");
+      ).to.be.revertedWith("TransferFromFailed()");
     });
 
     it("reverts if the recipient cannot receive WNT", async () => {
@@ -881,7 +879,7 @@ describe("Router", () => {
             ethers.constants.MaxUint256,
             { value: amountWNTOptimal.add(parseEther("1")) }
           )
-      ).to.revertedWith("Router: NT transfer failed");
+      ).to.revertedWith("NativeTokenTransferFailed()");
     });
 
     it("adds Native Token liquidity", async () => {
@@ -929,7 +927,7 @@ describe("Router", () => {
           alice.address,
           blockTimestamp - 1
         )
-      ).to.revertedWith("Router: Expired");
+      ).to.revertedWith("Expired()");
     });
 
     it("removes liquidity", async () => {
@@ -967,7 +965,7 @@ describe("Router", () => {
               alice.address,
               ethers.constants.MaxUint256
             )
-        ).to.revertedWith("Router: Insufficient a amount"),
+        ).to.revertedWith("InsufficientAmountA()"),
         expect(
           router
             .connect(alice)
@@ -981,7 +979,7 @@ describe("Router", () => {
               alice.address,
               ethers.constants.MaxUint256
             )
-        ).to.revertedWith("Router: Insufficient b amount"),
+        ).to.revertedWith("InsufficientAmountB()"),
         expect(
           router
             .connect(alice)
@@ -1016,7 +1014,7 @@ describe("Router", () => {
           alice.address,
           0
         )
-      ).to.revertedWith("Router: Expired");
+      ).to.revertedWith("Expired()");
     });
 
     it("removes Native Token liquidity", async () => {
@@ -1052,7 +1050,7 @@ describe("Router", () => {
             ethers.constants.AddressZero,
             ethers.constants.MaxUint256
           )
-      ).to.revertedWith("Router: Failed to transfer");
+      ).to.revertedWith("TransferFailed()");
 
       await expect(
         router
@@ -1399,7 +1397,7 @@ describe("Router", () => {
     it("reverts it is past the deadline", async () => {
       await expect(
         router.swapExactTokensForTokens(0, 0, [], alice.address, 0)
-      ).to.revertedWith("Router: Expired");
+      ).to.revertedWith("Expired()");
     });
 
     it("reverts if the min out is higher than possible amount", async () => {
@@ -1423,7 +1421,7 @@ describe("Router", () => {
           alice.address,
           ethers.constants.MaxUint256
         )
-      ).to.revertedWith("Router: Insufficient output");
+      ).to.revertedWith("InsufficientOutput()");
     });
 
     it("swaps between the best possible price", async () => {
@@ -1494,7 +1492,7 @@ describe("Router", () => {
     it("reverts if  the deadline has passed", async () => {
       await expect(
         router.swapExactNativeTokenForTokens(0, [], alice.address, 0)
-      ).to.revertedWith("Router: Expired");
+      ).to.revertedWith("Expired()");
     });
 
     it("reverts if first from is not wnt", async () => {
@@ -1505,7 +1503,7 @@ describe("Router", () => {
           alice.address,
           ethers.constants.MaxUint256
         )
-      ).to.revertedWith("Router: wrong route");
+      ).to.revertedWith("InvalidRoute()");
     });
 
     it("finds best price", async () => {
@@ -1615,15 +1613,15 @@ describe("Router", () => {
           ethers.constants.MaxUint256,
           { value: parseEther("2") }
         )
-      ).to.revertedWith("Router: Insufficient output");
+      ).to.revertedWith("InsufficientOutput()");
     });
   });
 
-  describe("function: swapExactTokensForBNB", () => {
+  describe("function: swapExactTokensForNativeToken", () => {
     it("reverts if  the deadline has passed", async () => {
       await expect(
         router.swapExactTokensForNativeToken(0, 0, [], alice.address, 0)
-      ).to.revertedWith("Router: Expired");
+      ).to.revertedWith("Expired()");
     });
 
     it("reverts if the route does not end in wnt", async () => {
@@ -1635,7 +1633,7 @@ describe("Router", () => {
           alice.address,
           ethers.constants.MaxUint256
         )
-      ).to.revertedWith("Router: wrong route");
+      ).to.revertedWith("InvalidRoute()");
     });
 
     it("reverts if it incurs too much slippage", async () => {
@@ -1686,7 +1684,7 @@ describe("Router", () => {
           alice.address,
           ethers.constants.MaxUint256
         )
-      ).to.revertedWith("Router: Insufficient output");
+      ).to.revertedWith("InsufficientOutput()");
     });
 
     it("finds best price", async () => {

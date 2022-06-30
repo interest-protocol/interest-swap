@@ -3,8 +3,9 @@ pragma solidity 0.8.15;
 
 import "./interfaces/IFactory.sol";
 
-import "./StablePair.sol";
-import "./VolatilePair.sol";
+import "./lib/Errors.sol";
+
+import "./Pair.sol";
 
 /**
  * @dev Factory creates stable or volatile pairs for two ERC20s.
@@ -48,15 +49,8 @@ contract Factory is IFactory {
     /**
      * @return bytes32 The hash of the creationCode of a volatile pair contract. It is a helper for other contracts to predict create2 addresses
      */
-    function volatilePairCodeHash() external pure returns (bytes32) {
-        return keccak256(type(VolatilePair).creationCode);
-    }
-
-    /**
-     * @return bytes32 The hash of the creationCode of a volatile pair contract. It is a helper for other contracts to predict create2 addresses
-     */
-    function stablePairCodeHash() external pure returns (bytes32) {
-        return keccak256(type(StablePair).creationCode);
+    function pairCodeHash() external pure returns (bytes32) {
+        return keccak256(type(Pair).creationCode);
     }
 
     /**
@@ -107,18 +101,17 @@ contract Factory is IFactory {
         if (getPair[token0][token1][stable] != address(0))
             revert AlreadyDeployed();
 
-        // Create a salt to deploy with a predeterministic create2 address
-        bytes32 salt = keccak256(abi.encodePacked(token0, token1, stable));
-
         // Assign the data for the pair to the state of the factory, so the pair can call {getInitializable}
-        (_token0, _token1, _stable) = (token0, token1, stable);
+        _token0 = token0;
+        _token1 = token1;
+        _stable = stable;
 
         // Deploy the right pair
-        if (stable) {
-            pair = address(new StablePair{salt: salt}());
-        } else {
-            pair = address(new VolatilePair{salt: salt}());
-        }
+        pair = address(
+            new Pair{
+                salt: keccak256(abi.encodePacked(token0, token1, stable))
+            }()
+        );
 
         // Populate the mapping both ways to access the data easier
         getPair[token0][token1][stable] = pair;
@@ -158,8 +151,8 @@ contract Factory is IFactory {
      * - The new governor cannot be the zero address.
      */
     function setGovernor(address _governor) external {
-        if (msg.sender != governor || _governor == address(0))
-            revert Unauthorized();
+        if (msg.sender != governor) revert Unauthorized();
+        if (_governor == address(0)) revert Unauthorized();
 
         emit NewGovernor(governor, _governor);
         governor = _governor;

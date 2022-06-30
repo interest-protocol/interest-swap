@@ -30,9 +30,7 @@ interface IFactory {
 
     function allPairsLength() external view returns (uint256);
 
-    function volatilePairCodeHash() external pure returns (bytes32);
-
-    function stablePairCodeHash() external pure returns (bytes32);
+    function pairCodeHash() external pure returns (bytes32);
 
     function getInitializable()
         external

@@ -470,6 +470,9 @@ contract Pair is IPair {
                 (reserve1Cumulative - firstObservation.reserve1Cumulative) /
                 timeElapsed;
         }
+
+        // Calculate he price in the opposite token
+        amountOut = _computeAmountOut(amountIn, tokenIn, _reserve0, _reserve1);
     }
 
     /**
@@ -510,13 +513,6 @@ contract Pair is IPair {
             decimals0,
             decimals1
         );
-    }
-
-    /**
-     * @dev Returns both tokens sorted
-     */
-    function tokens() external view returns (address, address) {
-        return (token0, token1);
     }
 
     /*//////////////////////////////////////////////////////////////

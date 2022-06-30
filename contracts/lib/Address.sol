@@ -3,6 +3,8 @@ pragma solidity 0.8.15;
 
 import "../interfaces/IERC20.sol";
 
+import "./Errors.sol";
+
 library Address {
     function returnDataToString(bytes memory data)
         internal
@@ -73,10 +75,8 @@ library Address {
             abi.encodeWithSelector(IERC20.transfer.selector, to, amount)
         );
         // Check that it returned the boolean true or no bytes or true in bytes
-        require(
-            success && (data.length == 0 || abi.decode(data, (bool))),
-            "Address: failed to transfer"
-        );
+        if (!success || !(data.length == 0 || abi.decode(data, (bool))))
+            revert TransferFailed();
     }
 
     /**

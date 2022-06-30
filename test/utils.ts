@@ -76,7 +76,7 @@ export const getPairDomainSeparator = (
           ),
           ethers.utils.solidityKeccak256(
             ["bytes"],
-            [ethers.utils.toUtf8Bytes("v1")]
+            [ethers.utils.toUtf8Bytes("1")]
           ),
           chainId,
           pairAddress,

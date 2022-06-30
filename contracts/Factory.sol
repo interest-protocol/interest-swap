@@ -3,6 +3,8 @@ pragma solidity 0.8.15;
 
 import "./interfaces/IFactory.sol";
 
+import "./lib/Errors.sol";
+
 import "./Pair.sol";
 
 /**
@@ -33,6 +35,7 @@ contract Factory is IFactory {
     bool private _stable;
 
     constructor() {
+        // Assign the governor to the creator of this contract.
         governor = msg.sender;
     }
 
@@ -44,7 +47,7 @@ contract Factory is IFactory {
     }
 
     /**
-     * @return bytes32 The hash of the creationCode of the pair contract. It is a helper for other contracts to predict create2 addresses
+     * @return bytes32 The hash of the creationCode of a volatile pair contract. It is a helper for other contracts to predict create2 addresses
      */
     function pairCodeHash() external pure returns (bytes32) {
         return keccak256(type(Pair).creationCode);
@@ -84,28 +87,31 @@ contract Factory is IFactory {
         bool stable
     ) external returns (address pair) {
         // Tokens must be different to create pair
-        require(tokenA != tokenB, "Factory: Invalid");
+        if (tokenA == tokenB) revert SameAddress();
+
         // Sort the pairs
         (address token0, address token1) = tokenA < tokenB
             ? (tokenA, tokenB)
             : (tokenB, tokenA);
 
         // Make sure they are not the zero address
-        require(token0 != address(0), "Factory: Zero address");
-        // Make sure this specific pair has not been deployed
-        require(
-            getPair[token0][token1][stable] == address(0),
-            "Factory: Already deployed"
-        );
+        if (token0 == address(0)) revert ZeroAddress();
 
-        // Create a salt to deploy with a predeterministic create2 address
-        bytes32 salt = keccak256(abi.encodePacked(token0, token1, stable));
+        // Make sure this specific pair has not been deployed
+        if (getPair[token0][token1][stable] != address(0))
+            revert AlreadyDeployed();
 
         // Assign the data for the pair to the state of the factory, so the pair can call {getInitializable}
-        (_token0, _token1, _stable) = (token0, token1, stable);
+        _token0 = token0;
+        _token1 = token1;
+        _stable = stable;
 
-        // Deploy the pair
-        pair = address(new Pair{salt: salt}());
+        // Deploy the right pair
+        pair = address(
+            new Pair{
+                salt: keccak256(abi.encodePacked(token0, token1, stable))
+            }()
+        );
 
         // Populate the mapping both ways to access the data easier
         getPair[token0][token1][stable] = pair;
@@ -129,7 +135,7 @@ contract Factory is IFactory {
      * - Only the {governor} can update this value.
      */
     function setFeeTo(address _feeTo) external {
-        require(msg.sender == governor, "Factory: Unauthorized");
+        if (msg.sender != governor) revert Unauthorized();
         emit NewTreasury(feeTo, _feeTo);
         feeTo = _feeTo;
     }
@@ -145,10 +151,9 @@ contract Factory is IFactory {
      * - The new governor cannot be the zero address.
      */
     function setGovernor(address _governor) external {
-        require(
-            msg.sender == governor && _governor != address(0),
-            "Factory: Unauthorized"
-        );
+        if (msg.sender != governor) revert Unauthorized();
+        if (_governor == address(0)) revert Unauthorized();
+
         emit NewGovernor(governor, _governor);
         governor = _governor;
     }

@@ -6,8 +6,6 @@ import {Observation} from "../lib/DataTypes.sol";
 import "./IERC20.sol";
 
 interface IPair is IERC20 {
-    event UpdatedFee(address indexed sender, uint256 amount0, uint256 amount1);
-
     event Mint(address indexed sender, uint256 amount0, uint256 amount1);
 
     event Burn(
@@ -28,8 +26,6 @@ interface IPair is IERC20 {
 
     event Sync(uint256 reserve0, uint256 reserve1);
 
-    event Claim(address indexed recipient, uint256 amount0, uint256 amount1);
-
     function stable() external view returns (bool);
 
     function nonces(address) external view returns (uint256);
@@ -37,8 +33,6 @@ interface IPair is IERC20 {
     function token0() external view returns (address);
 
     function token1() external view returns (address);
-
-    function feesContract() external view returns (address);
 
     function observations(uint256)
         external
@@ -58,18 +52,6 @@ interface IPair is IERC20 {
     function reserve0CumulativeLast() external view returns (uint256);
 
     function reserve1CumulativeLast() external view returns (uint256);
-
-    function index0() external view returns (uint256);
-
-    function index1() external view returns (uint256);
-
-    function supplyIndex0(address) external view returns (uint256);
-
-    function supplyIndex1(address) external view returns (uint256);
-
-    function claimable0(address) external view returns (uint256);
-
-    function claimable1(address) external view returns (uint256);
 
     function observationLength() external view returns (uint256);
 
@@ -97,18 +79,6 @@ interface IPair is IERC20 {
             uint256 dec1
         );
 
-    function getAccountFeesRewards(address account)
-        external
-        view
-        returns (
-            uint256,
-            uint256,
-            uint256,
-            uint256
-        );
-
-    function claimFees() external;
-
     function tokens() external view returns (address, address);
 
     function getReserves()
@@ -124,8 +94,6 @@ interface IPair is IERC20 {
         external
         view
         returns (uint256 amountOut);
-
-    function updateFeesFor(address account) external;
 
     function mint(address to) external returns (uint256 liquidity);
 

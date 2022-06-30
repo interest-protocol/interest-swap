@@ -8,14 +8,16 @@ import "./interfaces/IRouter.sol";
 import "./interfaces/IWNT.sol";
 
 import {Route, Amount} from "./lib/DataTypes.sol";
+import "./lib/Errors.sol";
 import "./lib/Math.sol";
 
 contract Router is IRouter {
+    bytes32 private immutable pairCodeHash;
+
     address public immutable factory;
     //solhint-disable-next-line var-name-mixedcase
     IWNT public immutable WNT;
     uint256 private constant MINIMUM_LIQUIDITY = 1000;
-    bytes32 private immutable pairCodeHash;
 
     constructor(address _factory, IWNT wnt) {
         factory = _factory;
@@ -25,7 +27,7 @@ contract Router is IRouter {
 
     modifier ensure(uint256 deadline) {
         //solhint-disable-next-line not-rely-on-time
-        require(deadline >= block.timestamp, "Router: Expired");
+        if (block.timestamp > deadline) revert Expired();
         _;
     }
 
@@ -39,11 +41,11 @@ contract Router is IRouter {
         pure
         returns (address token0, address token1)
     {
-        require(tokenA != tokenB, "Router: Same address");
+        if (tokenA == tokenB) revert SameAddress();
         (token0, token1) = tokenA < tokenB
             ? (tokenA, tokenB)
             : (tokenB, tokenA);
-        require(token0 != address(0), "Router: Zero address");
+        if (token0 == address(0)) revert ZeroAddress();
     }
 
     // calculates the CREATE2 address for a pair without making any external calls
@@ -117,29 +119,31 @@ contract Router is IRouter {
         view
         returns (Amount[] memory amounts)
     {
-        require(routes.length > 0, "Router: invalid path");
-        require(amount > 0, "Router: no 0 amount");
+        if (routes.length == 0) revert InvalidPath();
+        if (amount == 0) revert ZeroAmount();
 
-        amounts = new Amount[](routes.length + 1);
+        unchecked {
+            amounts = new Amount[](routes.length + 1);
 
-        amounts[0] = Amount(amount, false);
+            amounts[0] = Amount(amount, false);
 
-        for (uint256 i = 0; i < routes.length; i++) {
-            (address volatilePair, address stablePair) = getPairs(
-                routes[i].from,
-                routes[i].to
-            );
-
-            if (
-                IFactory(factory).isPair(volatilePair) ||
-                IFactory(factory).isPair(stablePair)
-            ) {
-                amounts[i + 1] = _getBestAmount(
+            for (uint256 i; i < routes.length; i++) {
+                (address volatilePair, address stablePair) = getPairs(
                     routes[i].from,
-                    amounts[i].amount,
-                    stablePair,
-                    volatilePair
+                    routes[i].to
                 );
+
+                if (
+                    IFactory(factory).isPair(volatilePair) ||
+                    IFactory(factory).isPair(stablePair)
+                ) {
+                    amounts[i + 1] = _getBestAmount(
+                        routes[i].from,
+                        amounts[i].amount,
+                        stablePair,
+                        volatilePair
+                    );
+                }
             }
         }
     }
@@ -329,8 +333,8 @@ contract Router is IRouter {
         (amountA, amountB) = tokenA == token0
             ? (amount0, amount1)
             : (amount1, amount0);
-        require(amountA >= amountAMin, "Router: Insufficient a amount");
-        require(amountB >= amountBMin, "Router: Insufficient b amount");
+        if (amountAMin > amountA) revert InsufficientAmountA();
+        if (amountBMin > amountB) revert InsufficientAmountB();
     }
 
     function removeLiquidityNativeToken(
@@ -375,9 +379,7 @@ contract Router is IRouter {
         bytes32 r,
         bytes32 s
     ) external returns (uint256 amountA, uint256 amountB) {
-        address pair = pairFor(tokenA, tokenB, stable);
-
-        IPair(pair).permit(
+        IPair(pairFor(tokenA, tokenB, stable)).permit(
             msg.sender,
             address(this),
             approveMax ? type(uint256).max : liquidity,
@@ -412,9 +414,7 @@ contract Router is IRouter {
         bytes32 r,
         bytes32 s
     ) external returns (uint256 amountToken, uint256 amountNativeToken) {
-        address pair = pairFor(token, address(WNT), stable);
-
-        IPair(pair).permit(
+        IPair(pairFor(token, address(WNT), stable)).permit(
             msg.sender,
             address(this),
             approveMax ? type(uint256).max : liquidity,
@@ -442,18 +442,20 @@ contract Router is IRouter {
         address to,
         uint256 deadline
     ) external ensure(deadline) returns (Amount[] memory amounts) {
-        amounts = getAmountsOut(amountIn, routes);
-        require(
-            amounts[amounts.length - 1].amount >= amountOutMin,
-            "Router: Insufficient output"
-        );
-        _safeTransferFrom(
-            routes[0].from,
-            msg.sender,
-            pairFor(routes[0].from, routes[0].to, amounts[1].stable),
-            amountIn
-        );
-        _swap(amounts, routes, to);
+        unchecked {
+            amounts = getAmountsOut(amountIn, routes);
+
+            if (amountOutMin > amounts[amounts.length - 1].amount)
+                revert InsufficientOutput();
+
+            _safeTransferFrom(
+                routes[0].from,
+                msg.sender,
+                pairFor(routes[0].from, routes[0].to, amounts[1].stable),
+                amountIn
+            );
+            _swap(amounts, routes, to);
+        }
     }
 
     function swapExactNativeTokenForTokens(
@@ -462,21 +464,23 @@ contract Router is IRouter {
         address to,
         uint256 deadline
     ) external payable ensure(deadline) returns (Amount[] memory amounts) {
-        require(routes[0].from == address(WNT), "Router: wrong route");
-        amounts = getAmountsOut(msg.value, routes);
-        require(
-            amounts[amounts.length - 1].amount >= amountOutMin,
-            "Router: Insufficient output"
-        );
+        unchecked {
+            if (routes[0].from != address(WNT)) revert InvalidRoute();
 
-        WNT.deposit{value: msg.value}();
-        assert(
-            WNT.transfer(
-                pairFor(routes[0].from, routes[0].to, amounts[1].stable),
-                msg.value
-            )
-        );
-        _swap(amounts, routes, to);
+            amounts = getAmountsOut(msg.value, routes);
+
+            if (amountOutMin > amounts[amounts.length - 1].amount)
+                revert InsufficientOutput();
+
+            WNT.deposit{value: msg.value}();
+            assert(
+                WNT.transfer(
+                    pairFor(routes[0].from, routes[0].to, amounts[1].stable),
+                    msg.value
+                )
+            );
+            _swap(amounts, routes, to);
+        }
     }
 
     function swapExactTokensForNativeToken(
@@ -486,24 +490,26 @@ contract Router is IRouter {
         address to,
         uint256 deadline
     ) external ensure(deadline) returns (Amount[] memory amounts) {
-        require(
-            routes[routes.length - 1].to == address(WNT),
-            "Router: wrong route"
-        );
-        amounts = getAmountsOut(amountIn, routes);
-        require(
-            amounts[amounts.length - 1].amount >= amountOutMin,
-            "Router: Insufficient output"
-        );
-        _safeTransferFrom(
-            routes[0].from,
-            msg.sender,
-            pairFor(routes[0].from, routes[0].to, amounts[1].stable),
-            amountIn
-        );
-        _swap(amounts, routes, address(this));
-        WNT.withdraw(amounts[amounts.length - 1].amount);
-        _safeTransferNativeToken(to, amounts[amounts.length - 1].amount);
+        unchecked {
+            if (routes[routes.length - 1].to != address(WNT))
+                revert InvalidRoute();
+
+            amounts = getAmountsOut(amountIn, routes);
+            uint256 lastIndex = amounts.length - 1;
+
+            if (amountOutMin > amounts[lastIndex].amount)
+                revert InsufficientOutput();
+
+            _safeTransferFrom(
+                routes[0].from,
+                msg.sender,
+                pairFor(routes[0].from, routes[0].to, amounts[1].stable),
+                amountIn
+            );
+            _swap(amounts, routes, address(this));
+            WNT.withdraw(amounts[lastIndex].amount);
+            _safeTransferNativeToken(to, amounts[lastIndex].amount);
+        }
     }
 
     // **** SWAP ****
@@ -513,25 +519,29 @@ contract Router is IRouter {
         Route[] memory routes,
         address _to
     ) private {
-        for (uint256 i = 0; i < routes.length; i++) {
-            (address token0, ) = sortTokens(routes[i].from, routes[i].to);
+        unchecked {
+            for (uint256 i; i < routes.length; i++) {
+                (address token0, ) = sortTokens(routes[i].from, routes[i].to);
 
-            uint256 amountOut = amounts[i + 1].amount;
+                uint256 amountOut = amounts[i + 1].amount;
 
-            (uint256 amount0Out, uint256 amount1Out) = routes[i].from == token0
-                ? (uint256(0), amountOut)
-                : (amountOut, uint256(0));
+                (uint256 amount0Out, uint256 amount1Out) = routes[i].from ==
+                    token0
+                    ? (uint256(0), amountOut)
+                    : (amountOut, uint256(0));
 
-            address to = i < routes.length - 1
-                ? pairFor(
-                    routes[i + 1].from,
-                    routes[i + 1].to,
-                    amounts[i + 2].stable
-                )
-                : _to;
+                address to = i < routes.length - 1
+                    ? pairFor(
+                        routes[i + 1].from,
+                        routes[i + 1].to,
+                        amounts[i + 2].stable
+                    )
+                    : _to;
 
-            IPair(pairFor(routes[i].from, routes[i].to, amounts[i + 1].stable))
-                .swap(amount0Out, amount1Out, to, "");
+                IPair(
+                    pairFor(routes[i].from, routes[i].to, amounts[i + 1].stable)
+                ).swap(amount0Out, amount1Out, to, new bytes(0));
+            }
         }
     }
 
@@ -544,16 +554,14 @@ contract Router is IRouter {
         uint256 amountStable;
         uint256 amountVolatile;
 
-        if (IFactory(factory).isPair(stablePair)) {
+        if (IFactory(factory).isPair(stablePair))
             amountStable = IPair(stablePair).getAmountOut(tokenIn, amountIn);
-        }
 
-        if (IFactory(factory).isPair(volatilePair)) {
+        if (IFactory(factory).isPair(volatilePair))
             amountVolatile = IPair(volatilePair).getAmountOut(
                 tokenIn,
                 amountIn
             );
-        }
 
         return
             amountStable > amountVolatile
@@ -566,15 +574,14 @@ contract Router is IRouter {
         address to,
         uint256 amount
     ) private {
-        assert(token.code.length > 0);
+        assert(token.code.length != 0);
         //solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory data) = token.call(
             abi.encodeWithSelector(IERC20.transfer.selector, to, amount)
         );
-        require(
-            success && (data.length == 0 || abi.decode(data, (bool))),
-            "Router: Failed to transfer"
-        );
+
+        if (!success || !(data.length == 0 || abi.decode(data, (bool))))
+            revert TransferFailed();
     }
 
     function _safeTransferFrom(
@@ -593,16 +600,15 @@ contract Router is IRouter {
                 value
             )
         );
-        require(
-            success && (data.length == 0 || abi.decode(data, (bool))),
-            "Router: Failed to transferFrom"
-        );
+
+        if (!success || !(data.length == 0 || abi.decode(data, (bool))))
+            revert TransferFromFailed();
     }
 
     function _safeTransferNativeToken(address to, uint256 value) private {
         //solhint-disable-next-line avoid-low-level-calls
         (bool success, ) = to.call{value: value}("");
-        require(success, "Router: NT transfer failed");
+        if (!success) revert NativeTokenTransferFailed();
     }
 
     // given some amount of an asset and pair reserves, returns the optimal amount of reserves to add for the token asset
@@ -611,8 +617,8 @@ contract Router is IRouter {
         uint256 reserveA,
         uint256 reserveB
     ) private pure returns (uint256 amountB) {
-        require(amountA > 0, "Router: no 0 amountA");
-        require(reserveA > 0 && reserveB > 0, "Router: not enough liquidity");
+        if (amountA == 0) revert ZeroAmount();
+        if (reserveA == 0 || reserveB == 0) revert NoLiquidity();
         amountB = (amountA * reserveB) / reserveA;
     }
 
@@ -625,8 +631,8 @@ contract Router is IRouter {
         uint256 amountAMin,
         uint256 amountBMin
     ) private returns (uint256 amountA, uint256 amountB) {
-        require(amountADesired >= amountAMin, "Router: wrong a amounts");
-        require(amountBDesired >= amountBMin, "Router: wrong b amounts");
+        if (amountAMin > amountADesired) revert InvalidAmountA();
+        if (amountBMin > amountBDesired) revert InvalidAmountB();
 
         // create the pair if it doesn't exist yet
         address _pair = IFactory(factory).getPair(tokenA, tokenB, stable);
@@ -650,10 +656,8 @@ contract Router is IRouter {
                 reserveB
             );
             if (amountBOptimal <= amountBDesired) {
-                require(
-                    amountBOptimal >= amountBMin,
-                    "Router: Insufficient amountB"
-                );
+                if (amountBMin > amountBOptimal) revert InsufficientAmountB();
+
                 (amountA, amountB) = (amountADesired, amountBOptimal);
             } else {
                 uint256 amountAOptimal = _quoteLiquidity(
@@ -662,10 +666,7 @@ contract Router is IRouter {
                     reserveA
                 );
                 assert(amountAOptimal <= amountADesired);
-                require(
-                    amountAOptimal >= amountAMin,
-                    "Router: Insufficient amountA"
-                );
+                if (amountAMin > amountAOptimal) revert InsufficientAmountA();
                 (amountA, amountB) = (amountAOptimal, amountBDesired);
             }
         }

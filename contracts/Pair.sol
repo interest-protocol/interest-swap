@@ -470,9 +470,13 @@ contract Pair is IPair {
                 (reserve1Cumulative - firstObservation.reserve1Cumulative) /
                 timeElapsed;
         }
+    }
 
-        // Calculate he price in the opposite token
-        amountOut = _computeAmountOut(amountIn, tokenIn, _reserve0, _reserve1);
+    /**
+     * @dev Returns both tokens sorted
+     */
+    function tokens() external view returns (address, address) {
+        return (token0, token1);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -514,6 +518,10 @@ contract Pair is IPair {
     function tokens() external view returns (address, address) {
         return (token0, token1);
     }
+
+    /*//////////////////////////////////////////////////////////////
+                            DEX Logic
+    //////////////////////////////////////////////////////////////*/
 
     /**
      * @dev It returns the last record of the reserves held by this pair.

@@ -359,11 +359,13 @@ contract Pair is IPair {
         view
         returns (Observation memory firstObservation)
     {
-        uint256 observationIndex = observationIndexOf(block.timestamp);
-        // no overflow issue. if observationIndex + 1 overflows, result is still zero.
-        uint256 firstObservationIndex = uncheckedInc(observationIndex) %
-            GRANULARITY;
-        firstObservation = observations[firstObservationIndex];
+        unchecked {
+            uint256 observationIndex = observationIndexOf(block.timestamp);
+            // no overflow issue. if observationIndex + 1 overflows, result is still zero.
+            uint256 firstObservationIndex = (observationIndex + 1) %
+                GRANULARITY;
+            firstObservation = observations[firstObservationIndex];
+        }
     }
 
     /**
@@ -708,8 +710,8 @@ contract Pair is IPair {
             if (
                 _k(_reserve0, _reserve1) >
                 _k(
-                    _balance0 - amount0In.mul(swapFee),
-                    _balance1 - amount1In.mul(swapFee)
+                    _balance0 - amount0In.fmul(swapFee),
+                    _balance1 - amount1In.fmul(swapFee)
                 )
             ) revert K();
         }
@@ -762,7 +764,7 @@ contract Pair is IPair {
     {
         unchecked {
             // Remove the fee
-            amountIn = uncheckedSubSwapFee(amountIn); // remove fee from amount received
+            amountIn -= amountIn.fmul(swapFee); // remove fee from amount received
         }
         return _computeAmountOut(amountIn, tokenIn, reserve0, reserve1);
     }
@@ -883,32 +885,6 @@ contract Pair is IPair {
         }
 
         emit Transfer(from, address(0), amount);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                        Gas Optimization
-    //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Save gas on for loops
-     */
-    function uncheckedInc(uint256 i) private pure returns (uint256) {
-        unchecked {
-            return i + 1;
-        }
-    }
-
-    /**
-     * @notice Save gas on fee calculations
-     */
-    function uncheckedSubSwapFee(uint256 amount)
-        private
-        view
-        returns (uint256)
-    {
-        unchecked {
-            return amount -= amount.mul(swapFee);
-        }
     }
 
     /*//////////////////////////////////////////////////////////////

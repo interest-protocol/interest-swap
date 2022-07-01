@@ -11,20 +11,22 @@ library Address {
         pure
         returns (string memory)
     {
-        if (data.length >= 64) {
-            return abi.decode(data, (string));
-        } else if (data.length == 32) {
-            uint8 i = 0;
-            while (i < 32 && data[i] != 0) {
-                i++;
+        unchecked {
+            if (data.length >= 64) {
+                return abi.decode(data, (string));
+            } else if (data.length == 32) {
+                uint8 i = 0;
+                while (i < 32 && data[i] != 0) {
+                    i++;
+                }
+                bytes memory bytesArray = new bytes(i);
+                for (i = 0; i < 32 && data[i] != 0; i++) {
+                    bytesArray[i] = data[i];
+                }
+                return string(bytesArray);
+            } else {
+                return "???";
             }
-            bytes memory bytesArray = new bytes(i);
-            for (i = 0; i < 32 && data[i] != 0; i++) {
-                bytesArray[i] = data[i];
-            }
-            return string(bytesArray);
-        } else {
-            return "???";
         }
     }
 
@@ -32,7 +34,7 @@ library Address {
     /// @param token The address of the ERC-20 token contract.
     /// @return (string) Token symbol.
     function safeSymbol(address token) internal view returns (string memory) {
-        require(token.code.length > 0, "Address: not a contract");
+        if (0 == token.code.length) revert NotAContract();
 
         (bool success, bytes memory data) = token.staticcall(
             abi.encodeWithSelector(IERC20.symbol.selector)
@@ -44,7 +46,7 @@ library Address {
     /// @param token The address of the ERC-20 token contract.
     /// @return (uint8) Token decimals.
     function safeDecimals(address token) internal view returns (uint8) {
-        require(token.code.length > 0, "Address: not a contract");
+        if (0 == token.code.length) revert NotAContract();
 
         (bool success, bytes memory data) = token.staticcall(
             abi.encodeWithSelector(IERC20.decimals.selector)
@@ -69,7 +71,8 @@ library Address {
         address to,
         uint256 amount
     ) internal {
-        require(token.code.length > 0, "Address: not a contract");
+        if (0 == token.code.length) revert NotAContract();
+
         //solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory data) = token.call(
             abi.encodeWithSelector(IERC20.transfer.selector, to, amount)

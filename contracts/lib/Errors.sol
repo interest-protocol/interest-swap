@@ -52,3 +52,5 @@ error Unauthorized();
 error AlreadyDeployed();
 
 error MissingObservation();
+
+error NotAContract();

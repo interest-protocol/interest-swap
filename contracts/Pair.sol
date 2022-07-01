@@ -929,7 +929,7 @@ contract Pair is IPair {
         uint256 xy,
         uint256 y
     ) private pure returns (uint256) {
-        for (uint256 i = 0; i < 255; i++) {
+        for (uint256 i = 0; i < 255; i = _uncheckedInc(i)) {
             uint256 yPrev = y;
             uint256 k = _f(x0, y);
             if (k < xy) {
@@ -984,6 +984,16 @@ contract Pair is IPair {
                 ? (_reserve0, _reserve1)
                 : (_reserve1, _reserve0);
             return (amountIn * reserveB) / (reserveA + amountIn);
+        }
+    }
+
+    /**
+     *@notice Helper to optimize gas to increment a number
+     */
+    function _uncheckedInc(uint256 i) private pure returns (uint256 y) {
+        //solhint-disable-next-line no-inline-assembly
+        assembly {
+            y := add(i, 1)
         }
     }
 }

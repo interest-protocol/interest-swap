@@ -340,7 +340,7 @@ describe("Pair", () => {
           ethers.constants.HashZero,
           ethers.constants.HashZero
         )
-      ).to.revertedWith("PermitExpired()");
+      ).to.revertedWith("Pair__PermitExpired()");
     });
 
     it("reverts if the recovered address is wrong", async () => {
@@ -383,7 +383,7 @@ describe("Pair", () => {
               r,
               s
             )
-        ).to.revertedWith("InvalidSignature()"),
+        ).to.revertedWith("Pair__InvalidSignature()"),
         expect(
           volatilePair
             .connect(bob)
@@ -396,7 +396,7 @@ describe("Pair", () => {
               ethers.constants.HashZero,
               ethers.constants.HashZero
             )
-        ).to.revertedWith("InvalidSignature()"),
+        ).to.revertedWith("Pair__InvalidSignature()"),
       ]);
     });
 
@@ -466,7 +466,7 @@ describe("Pair", () => {
     it("reverts if the first observation is stale", async () => {
       await expect(
         volatilePair.getTokenPrice(tokenA.address, parseEther("1"))
-      ).to.revertedWith("MissingObservation()");
+      ).to.revertedWith("Pair__MissingObservation()");
     });
 
     it("returns a TWAP", async () => {
@@ -502,7 +502,7 @@ describe("Pair", () => {
 
       await expect(
         volatilePair.getTokenPrice(tokenA.address, parseEther("1"))
-      ).to.revertedWith("MissingObservation()");
+      ).to.revertedWith("Pair__MissingObservation()");
 
       const advanceAndSwap = async () => {
         for (let i = 0; i < 13; i++) {
@@ -575,7 +575,7 @@ describe("Pair", () => {
 
       await expect(
         volatilePair.getTokenPrice(tokenA.address, parseEther("1"))
-      ).to.revertedWith("MissingObservation()");
+      ).to.revertedWith("Pair__MissingObservation()");
     });
   });
 
@@ -599,7 +599,7 @@ describe("Pair", () => {
       tokenA.connect(alice).transfer(volatilePair.address, parseEther("12"));
 
       await expect(volatilePair.mint(alice.address)).to.revertedWith(
-        "NoLiquidity()"
+        "Pair__NoLiquidity()"
       );
     });
 
@@ -630,7 +630,7 @@ describe("Pair", () => {
       ]);
 
       await expect(brokenPair.mint(alice.address)).to.revertedWith(
-        "Reentrancy()"
+        "Pair__Reentrancy()"
       );
     });
 
@@ -842,7 +842,7 @@ describe("Pair", () => {
       await volatilePair.mint(alice.address);
 
       await expect(volatilePair.burn(alice.address)).to.revertedWith(
-        "NoTokensToBurn()"
+        "Pair__NoTokensToBurn()"
       );
     });
 
@@ -873,7 +873,7 @@ describe("Pair", () => {
       ]);
 
       await expect(brokenPair.burn(alice.address)).to.revertedWith(
-        "Reentrancy()"
+        "Pair__Reentrancy()"
       );
     });
 
@@ -1118,7 +1118,7 @@ describe("Pair", () => {
       ]);
 
       await expect(brokenPair.skim(alice.address)).to.revertedWith(
-        "Reentrancy()"
+        "Pair__Reentrancy()"
       );
     });
     it("forces the reserves to match the balances by sending", async () => {
@@ -1345,7 +1345,7 @@ describe("Pair", () => {
   describe("function: swap", () => {
     it("reverts do not wish to get any tokens", async () => {
       await expect(volatilePair.swap(0, 0, owner.address, [])).to.revertedWith(
-        "NoZeroTrades()"
+        "Pair__NoZeroTrades()"
       );
     });
 
@@ -1372,10 +1372,10 @@ describe("Pair", () => {
       await Promise.all([
         expect(
           volatilePair.swap(amountOut0, 0, owner.address, [])
-        ).to.revertedWith("NoLiquidity()"),
+        ).to.revertedWith("Pair__NoLiquidity()"),
         expect(
           volatilePair.swap(0, amountOut1, owner.address, [])
-        ).to.revertedWith("NoLiquidity()"),
+        ).to.revertedWith("Pair__NoLiquidity()"),
       ]);
     });
 
@@ -1391,10 +1391,10 @@ describe("Pair", () => {
 
       await Promise.all([
         expect(volatilePair.swap(1, 0, tokenA.address, [])).to.revertedWith(
-          "InvalidReceiver()"
+          "Pair__InvalidReceiver()"
         ),
         expect(volatilePair.swap(0, 1, tokenB.address, [])).to.revertedWith(
-          "InvalidReceiver()"
+          "Pair__InvalidReceiver()"
         ),
       ]);
     });
@@ -1411,10 +1411,10 @@ describe("Pair", () => {
 
       await Promise.all([
         expect(volatilePair.swap(1, 0, owner.address, [])).to.revertedWith(
-          "InsufficientAmountIn()"
+          "Pair__InsufficientAmountIn()"
         ),
         expect(volatilePair.swap(0, 1, owner.address, [])).to.revertedWith(
-          "InsufficientAmountIn()"
+          "Pair__InsufficientAmountIn()"
         ),
       ]);
     });
@@ -1461,10 +1461,10 @@ describe("Pair", () => {
       await Promise.all([
         expect(
           volatilePair.swap(vAmountOut0, vAmountOut1, alice.address, [])
-        ).to.revertedWith("K()"),
+        ).to.revertedWith("Pair__K()"),
         expect(
           stablePair.swap(sAmountOut0, sAmountOut1, alice.address, [])
-        ).to.revertedWith("K()"),
+        ).to.revertedWith("Pair__K()"),
       ]);
     });
 

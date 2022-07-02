@@ -52,7 +52,7 @@ describe("Factory", () => {
     it("reverts if it is not called by the governor", async () => {
       await expect(
         factory.connect(alice).setFeeTo(owner.address)
-      ).to.be.revertedWith("Unauthorized()");
+      ).to.be.revertedWith("Factory__Unauthorized()");
     });
     it("sets a new feeTo address", async () => {
       expect(await factory.feeTo()).to.be.equal(ethers.constants.AddressZero);
@@ -68,16 +68,16 @@ describe("Factory", () => {
     it("reverts if it is not called by the governor", async () => {
       await expect(
         factory.connect(alice).setGovernor(alice.address)
-      ).to.be.revertedWith("Unauthorized()");
+      ).to.be.revertedWith("Factory__Unauthorized()");
     });
     it("reverts if the new governor is the zero address", async () => {
       await Promise.all([
         expect(
           factory.connect(owner).setGovernor(ethers.constants.AddressZero)
-        ).to.be.revertedWith("Unauthorized()"),
+        ).to.be.revertedWith("Factory__Unauthorized()"),
         expect(
           factory.connect(alice).setGovernor(ethers.constants.AddressZero)
-        ).to.be.revertedWith("Unauthorized()"),
+        ).to.be.revertedWith("Factory__Unauthorized()"),
       ]);
     });
     it("sets a new governor", async () => {
@@ -99,24 +99,24 @@ describe("Factory", () => {
             ethers.constants.AddressZero,
             false
           )
-        ).to.be.revertedWith("ZeroAddress()"),
+        ).to.be.revertedWith("Factory__ZeroAddress()"),
         expect(
           factory.createPair(
             ethers.constants.AddressZero,
             tokenA.address,
             false
           )
-        ).to.be.revertedWith("ZeroAddress()"),
+        ).to.be.revertedWith("Factory__ZeroAddress()"),
         expect(
           factory.createPair(tokenA.address, tokenA.address, false)
-        ).to.be.revertedWith("SameAddress()"),
+        ).to.be.revertedWith("Factory__SameAddress()"),
       ]);
 
       await factory.createPair(tokenA.address, tokenB.address, false);
 
       await expect(
         factory.createPair(tokenA.address, tokenB.address, false)
-      ).to.be.revertedWith("AlreadyDeployed()");
+      ).to.be.revertedWith("Factory__AlreadyDeployed()");
     });
 
     it("deploys a new pair", async () => {

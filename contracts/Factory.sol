@@ -3,7 +3,7 @@ pragma solidity 0.8.15;
 
 import "./interfaces/IFactory.sol";
 
-import "./lib/Errors.sol";
+import "./errors/FactoryErrors.sol";
 
 import "./Pair.sol";
 
@@ -87,7 +87,7 @@ contract Factory is IFactory {
         bool stable
     ) external returns (address pair) {
         // Tokens must be different to create pair
-        if (tokenA == tokenB) revert SameAddress();
+        if (tokenA == tokenB) revert Factory__SameAddress();
 
         // Sort the pairs
         (address token0, address token1) = tokenA < tokenB
@@ -95,11 +95,11 @@ contract Factory is IFactory {
             : (tokenB, tokenA);
 
         // Make sure they are not the zero address
-        if (token0 == address(0)) revert ZeroAddress();
+        if (token0 == address(0)) revert Factory__ZeroAddress();
 
         // Make sure this specific pair has not been deployed
         if (getPair[token0][token1][stable] != address(0))
-            revert AlreadyDeployed();
+            revert Factory__AlreadyDeployed();
 
         // Assign the data for the pair to the state of the factory, so the pair can call {getInitializable}
         _token0 = token0;
@@ -135,7 +135,7 @@ contract Factory is IFactory {
      * - Only the {governor} can update this value.
      */
     function setFeeTo(address _feeTo) external {
-        if (msg.sender != governor) revert Unauthorized();
+        if (msg.sender != governor) revert Factory__Unauthorized();
         emit NewTreasury(feeTo, _feeTo);
         feeTo = _feeTo;
     }
@@ -151,8 +151,8 @@ contract Factory is IFactory {
      * - The new governor cannot be the zero address.
      */
     function setGovernor(address _governor) external {
-        if (msg.sender != governor) revert Unauthorized();
-        if (_governor == address(0)) revert Unauthorized();
+        if (msg.sender != governor) revert Factory__Unauthorized();
+        if (_governor == address(0)) revert Factory__Unauthorized();
 
         emit NewGovernor(governor, _governor);
         governor = _governor;

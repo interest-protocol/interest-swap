@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.15;
 
+import "./errors/RouterErrors.sol";
+
 import "./interfaces/IERC20.sol";
 import "./interfaces/IFactory.sol";
 import "./interfaces/IPair.sol";
@@ -8,7 +10,6 @@ import "./interfaces/IRouter.sol";
 import "./interfaces/IWNT.sol";
 
 import {Route, Amount} from "./lib/DataTypes.sol";
-import "./lib/Errors.sol";
 import "./lib/Math.sol";
 
 contract Router is IRouter {
@@ -27,7 +28,7 @@ contract Router is IRouter {
 
     modifier ensure(uint256 deadline) {
         //solhint-disable-next-line not-rely-on-time
-        if (block.timestamp > deadline) revert Expired();
+        if (block.timestamp > deadline) revert Router__Expired();
         _;
     }
 
@@ -41,11 +42,11 @@ contract Router is IRouter {
         pure
         returns (address token0, address token1)
     {
-        if (tokenA == tokenB) revert SameAddress();
+        if (tokenA == tokenB) revert Router__SameAddress();
         (token0, token1) = tokenA < tokenB
             ? (tokenA, tokenB)
             : (tokenB, tokenA);
-        if (token0 == address(0)) revert ZeroAddress();
+        if (token0 == address(0)) revert Router__ZeroAddress();
     }
 
     // calculates the CREATE2 address for a pair without making any external calls
@@ -119,8 +120,8 @@ contract Router is IRouter {
         view
         returns (Amount[] memory amounts)
     {
-        if (routes.length == 0) revert InvalidPath();
-        if (amount == 0) revert ZeroAmount();
+        if (routes.length == 0) revert Router__InvalidPath();
+        if (amount == 0) revert Router__ZeroAmount();
 
         unchecked {
             amounts = new Amount[](routes.length + 1);
@@ -333,8 +334,8 @@ contract Router is IRouter {
         (amountA, amountB) = tokenA == token0
             ? (amount0, amount1)
             : (amount1, amount0);
-        if (amountAMin > amountA) revert InsufficientAmountA();
-        if (amountBMin > amountB) revert InsufficientAmountB();
+        if (amountAMin > amountA) revert Router__InsufficientAmountA();
+        if (amountBMin > amountB) revert Router__InsufficientAmountB();
     }
 
     function removeLiquidityNativeToken(
@@ -446,7 +447,7 @@ contract Router is IRouter {
             amounts = getAmountsOut(amountIn, routes);
 
             if (amountOutMin > amounts[amounts.length - 1].amount)
-                revert InsufficientOutput();
+                revert Router__InsufficientOutput();
 
             _safeTransferFrom(
                 routes[0].from,
@@ -465,12 +466,12 @@ contract Router is IRouter {
         uint256 deadline
     ) external payable ensure(deadline) returns (Amount[] memory amounts) {
         unchecked {
-            if (routes[0].from != address(WNT)) revert InvalidRoute();
+            if (routes[0].from != address(WNT)) revert Router__InvalidRoute();
 
             amounts = getAmountsOut(msg.value, routes);
 
             if (amountOutMin > amounts[amounts.length - 1].amount)
-                revert InsufficientOutput();
+                revert Router__InsufficientOutput();
 
             WNT.deposit{value: msg.value}();
             assert(
@@ -492,13 +493,13 @@ contract Router is IRouter {
     ) external ensure(deadline) returns (Amount[] memory amounts) {
         unchecked {
             if (routes[routes.length - 1].to != address(WNT))
-                revert InvalidRoute();
+                revert Router__InvalidRoute();
 
             amounts = getAmountsOut(amountIn, routes);
             uint256 lastIndex = amounts.length - 1;
 
             if (amountOutMin > amounts[lastIndex].amount)
-                revert InsufficientOutput();
+                revert Router__InsufficientOutput();
 
             _safeTransferFrom(
                 routes[0].from,
@@ -581,7 +582,7 @@ contract Router is IRouter {
         );
 
         if (!success || !(data.length == 0 || abi.decode(data, (bool))))
-            revert TransferFailed();
+            revert Router__TransferFailed();
     }
 
     function _safeTransferFrom(
@@ -602,13 +603,13 @@ contract Router is IRouter {
         );
 
         if (!success || !(data.length == 0 || abi.decode(data, (bool))))
-            revert TransferFromFailed();
+            revert Router__TransferFromFailed();
     }
 
     function _safeTransferNativeToken(address to, uint256 value) private {
         //solhint-disable-next-line avoid-low-level-calls
         (bool success, ) = to.call{value: value}("");
-        if (!success) revert NativeTokenTransferFailed();
+        if (!success) revert Router__NativeTokenTransferFailed();
     }
 
     // given some amount of an asset and pair reserves, returns the optimal amount of reserves to add for the token asset
@@ -617,8 +618,8 @@ contract Router is IRouter {
         uint256 reserveA,
         uint256 reserveB
     ) private pure returns (uint256 amountB) {
-        if (amountA == 0) revert ZeroAmount();
-        if (reserveA == 0 || reserveB == 0) revert NoLiquidity();
+        if (amountA == 0) revert Router__ZeroAmount();
+        if (reserveA == 0 || reserveB == 0) revert Router__NoLiquidity();
         amountB = (amountA * reserveB) / reserveA;
     }
 
@@ -631,8 +632,8 @@ contract Router is IRouter {
         uint256 amountAMin,
         uint256 amountBMin
     ) private returns (uint256 amountA, uint256 amountB) {
-        if (amountAMin > amountADesired) revert InvalidAmountA();
-        if (amountBMin > amountBDesired) revert InvalidAmountB();
+        if (amountAMin > amountADesired) revert Router__InvalidAmountA();
+        if (amountBMin > amountBDesired) revert Router__InvalidAmountB();
 
         // create the pair if it doesn't exist yet
         address _pair = IFactory(factory).getPair(tokenA, tokenB, stable);
@@ -656,7 +657,8 @@ contract Router is IRouter {
                 reserveB
             );
             if (amountBOptimal <= amountBDesired) {
-                if (amountBMin > amountBOptimal) revert InsufficientAmountB();
+                if (amountBMin > amountBOptimal)
+                    revert Router__InsufficientAmountB();
 
                 (amountA, amountB) = (amountADesired, amountBOptimal);
             } else {
@@ -666,7 +668,8 @@ contract Router is IRouter {
                     reserveA
                 );
                 assert(amountAOptimal <= amountADesired);
-                if (amountAMin > amountAOptimal) revert InsufficientAmountA();
+                if (amountAMin > amountAOptimal)
+                    revert Router__InsufficientAmountA();
                 (amountA, amountB) = (amountAOptimal, amountBDesired);
             }
         }

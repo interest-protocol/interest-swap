@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.15;
 
+import "./errors/FactoryErrors.sol";
+
 import "./interfaces/IFactory.sol";
 import "./interfaces/IPair.sol";
 import "./interfaces/IPairCallee.sol";
 
 import "./lib/Math.sol";
 import {Observation} from "./lib/DataTypes.sol";
-import "./lib/Errors.sol";
 import "./lib/Address.sol";
 
 //solhint-disable var-name-mixedcase
@@ -221,7 +222,7 @@ contract Pair is IPair {
         bytes32 s
     ) external {
         //solhint-disable-next-line not-rely-on-time
-        if (block.timestamp > deadline) revert PermitExpired();
+        if (block.timestamp > deadline) revert Pair__PermitExpired();
         unchecked {
             bytes32 digest = keccak256(
                 abi.encodePacked(
@@ -245,7 +246,7 @@ contract Pair is IPair {
             address recoveredAddress = ecrecover(digest, v, r, s);
 
             if (recoveredAddress == address(0) || recoveredAddress != owner)
-                revert InvalidSignature();
+                revert Pair__InvalidSignature();
 
             allowance[owner][spender] = value;
         }
@@ -331,7 +332,7 @@ contract Pair is IPair {
     // Basic nonreentrancy guard
     uint256 private _unlocked = 1;
     modifier lock() {
-        if (_unlocked != 1) revert Reentrancy();
+        if (_unlocked != 1) revert Pair__Reentrancy();
         _unlocked = 2;
         _;
         _unlocked = 1;
@@ -444,7 +445,7 @@ contract Pair is IPair {
         unchecked {
             timeElapsed = block.timestamp - firstObservation.timestamp;
             // Only happens if the pair has low trading activity.
-            if (timeElapsed > WINDOW) revert MissingObservation();
+            if (timeElapsed > WINDOW) revert Pair__MissingObservation();
 
             // should never happen if the case above passes.
             assert(timeElapsed >= WINDOW - PERIOD_SIZE * 2);
@@ -581,7 +582,7 @@ contract Pair is IPair {
         }
 
         // Must provide enough liquidity
-        if (liquidity == 0) revert NoLiquidity();
+        if (liquidity == 0) revert Pair__NoLiquidity();
 
         // Send the LP tokens
         _mint(to, liquidity);
@@ -623,7 +624,7 @@ contract Pair is IPair {
         amount0 = (tokensToBurn * _balance0) / _totalSupply; // using balances ensures pro-rata distribution
         amount1 = (tokensToBurn * _balance1) / _totalSupply; // using balances ensures pro-rata distribution
 
-        if (amount0 == 0 && amount1 == 0) revert NoTokensToBurn();
+        if (amount0 == 0 && amount1 == 0) revert Pair__NoTokensToBurn();
 
         // Burn the tokens sent without updating the fees as pair keeps no fees.
         _burn(address(this), tokensToBurn);
@@ -662,14 +663,14 @@ contract Pair is IPair {
         address to,
         bytes calldata data
     ) external lock {
-        if (amount0Out == 0 && amount1Out == 0) revert NoZeroTrades();
+        if (amount0Out == 0 && amount1Out == 0) revert Pair__NoZeroTrades();
 
         // Save current reserves in memory
         (uint256 _reserve0, uint256 _reserve1) = (reserve0, reserve1);
 
         // Cannot wish to buy more than the current reserves
         if (amount0Out > _reserve0 || amount1Out > _reserve1)
-            revert NoLiquidity();
+            revert Pair__NoLiquidity();
 
         uint256 _balance0;
         uint256 _balance1;
@@ -677,7 +678,7 @@ contract Pair is IPair {
             // Saves tokens in memory to save gas
             (address _token0, address _token1) = (token0, token1);
             // Make sure the to is not one of the tokens
-            if (to == _token0 || _token1 == to) revert InvalidReceiver();
+            if (to == _token0 || _token1 == to) revert Pair__InvalidReceiver();
 
             if (amount0Out > 0) _token0.safeTransfer(to, amount0Out); // optimistically transfer tokens
             if (amount1Out > 0) _token1.safeTransfer(to, amount1Out); // optimistically transfer tokens
@@ -699,7 +700,8 @@ contract Pair is IPair {
             : 0;
 
         // Throw if no tokens were sent
-        if (amount0In == 0 && amount1In == 0) revert InsufficientAmountIn();
+        if (amount0In == 0 && amount1In == 0)
+            revert Pair__InsufficientAmountIn();
 
         {
             // scope for reserve{0,1}Adjusted, avoids stack too deep errors
@@ -717,7 +719,7 @@ contract Pair is IPair {
                     _balance0 - amount0In.fmul(swapFee),
                     _balance1 - amount1In.fmul(swapFee)
                 )
-            ) revert K();
+            ) revert Pair__K();
         }
         // Update the observations and the reserves.
         _sync(_balance0, _balance1, _reserve0, _reserve1);

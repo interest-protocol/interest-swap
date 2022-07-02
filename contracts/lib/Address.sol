@@ -1,9 +1,9 @@
 //SPDX-License-Identifier: MIT
 pragma solidity 0.8.15;
 
-import "../interfaces/IERC20.sol";
+import "../errors/AddressLibErrors.sol";
 
-import "./Errors.sol";
+import "../interfaces/IERC20.sol";
 
 library Address {
     function returnDataToString(bytes memory data)
@@ -34,7 +34,7 @@ library Address {
     /// @param token The address of the ERC-20 token contract.
     /// @return (string) Token symbol.
     function safeSymbol(address token) internal view returns (string memory) {
-        if (0 == token.code.length) revert NotAContract();
+        if (0 == token.code.length) revert AddressLib__NotAContract();
 
         (bool success, bytes memory data) = token.staticcall(
             abi.encodeWithSelector(IERC20.symbol.selector)
@@ -46,7 +46,7 @@ library Address {
     /// @param token The address of the ERC-20 token contract.
     /// @return (uint8) Token decimals.
     function safeDecimals(address token) internal view returns (uint8) {
-        if (0 == token.code.length) revert NotAContract();
+        if (0 == token.code.length) revert AddressLib__NotAContract();
 
         (bool success, bytes memory data) = token.staticcall(
             abi.encodeWithSelector(IERC20.decimals.selector)
@@ -71,7 +71,7 @@ library Address {
         address to,
         uint256 amount
     ) internal {
-        if (0 == token.code.length) revert NotAContract();
+        if (0 == token.code.length) revert AddressLib__NotAContract();
 
         //solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory data) = token.call(
@@ -79,7 +79,7 @@ library Address {
         );
         // Check that it returned the boolean true or no bytes or true in bytes
         if (!success || !(data.length == 0 || abi.decode(data, (bool))))
-            revert TransferFailed();
+            revert AddressLib__TransferFailed();
     }
 
     /**

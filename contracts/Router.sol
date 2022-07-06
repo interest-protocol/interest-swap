@@ -178,16 +178,8 @@ contract Router is IRouter {
             (reserveA, reserveB) = getReserves(tokenA, tokenB, stable);
         }
         if (reserveA == 0 && reserveB == 0) {
-            uint256 minAmount = Math.min(amountADesired, amountBDesired);
-
-            (amountA, amountB) = (
-                stable ? minAmount : amountADesired,
-                stable ? minAmount : amountBDesired
-            );
-
-            liquidity = stable
-                ? Math.sqrt(minAmount * minAmount) - MINIMUM_LIQUIDITY
-                : Math.sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
+            (amountA, amountB) = (amountADesired, amountBDesired);
+            liquidity = Math.sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
         } else {
             uint256 amountBOptimal = _quoteLiquidity(
                 amountADesired,
@@ -646,10 +638,7 @@ contract Router is IRouter {
             stable
         );
         if (reserveA == 0 && reserveB == 0) {
-            uint256 minAmount = Math.min(amountADesired, amountBDesired);
-            (amountA, amountB) = stable
-                ? (minAmount, minAmount)
-                : (amountADesired, amountBDesired);
+            (amountA, amountB) = (amountADesired, amountBDesired);
         } else {
             uint256 amountBOptimal = _quoteLiquidity(
                 amountADesired,

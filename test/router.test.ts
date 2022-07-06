@@ -413,9 +413,9 @@ describe("Router", () => {
       );
 
       expect(sAmountA).to.be.equal(parseEther("300"));
-      expect(sAmountB).to.be.equal(parseEther("300"));
+      expect(sAmountB).to.be.equal(parseEther("500"));
       expect(sLiquidity).to.be.equal(
-        sqrt(parseEther("300").mul(parseEther("300"))).sub(MINIMUM_LIQUIDITY)
+        sqrt(parseEther("300").mul(parseEther("500"))).sub(MINIMUM_LIQUIDITY)
       );
     });
 
@@ -668,7 +668,7 @@ describe("Router", () => {
         .to.emit(tokenA, "Transfer")
         .withArgs(alice.address, pair1Address, parseEther("500"))
         .to.emit(tokenB, "Transfer")
-        .withArgs(alice.address, pair1Address, parseEther("500"));
+        .withArgs(alice.address, pair1Address, parseEther("501"));
 
       const p2 = expect(
         router

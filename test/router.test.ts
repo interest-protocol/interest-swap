@@ -180,6 +180,69 @@ describe("Router", () => {
   });
 
   describe("function: getAmountOut", () => {
+    it("does not revert if the pair throws an error", async () => {
+      const pairCode = (await ethers.getContractFactory("Pair")).bytecode;
+      const errorCode = (await ethers.getContractFactory("PairGetAmountError"))
+        .bytecode;
+
+      const wrongDataCode = (
+        await ethers.getContractFactory("PairGetAmountWrongData")
+      ).bytecode;
+
+      await network.provider.send("hardhat_setCode", [
+        volatilePair.address,
+        errorCode,
+      ]);
+
+      await expect(
+        router.getAmountOut(parseEther("10"), tokenA.address, tokenB.address)
+      ).to.not.reverted;
+
+      await network.provider.send("hardhat_setCode", [
+        volatilePair.address,
+        wrongDataCode,
+      ]);
+
+      await expect(
+        router.getAmountOut(parseEther("10"), tokenA.address, tokenB.address)
+      ).to.not.reverted;
+
+      await factory.createPair(tokenA.address, tokenC.address, true);
+
+      const stablePairAddress = await factory.getPair(
+        tokenA.address,
+        tokenC.address,
+        true
+      );
+
+      await network.provider.send("hardhat_setCode", [
+        stablePairAddress,
+        errorCode,
+      ]);
+
+      await expect(
+        router.getAmountOut(parseEther("10"), tokenA.address, tokenC.address)
+      ).to.not.reverted;
+
+      await network.provider.send("hardhat_setCode", [
+        stablePairAddress,
+        wrongDataCode,
+      ]);
+
+      await expect(
+        router.getAmountOut(parseEther("10"), tokenA.address, tokenC.address)
+      ).to.not.reverted;
+
+      await network.provider.send("hardhat_setCode", [
+        volatilePair.address,
+        pairCode,
+      ]);
+
+      await network.provider.send("hardhat_setCode", [
+        stablePairAddress,
+        pairCode,
+      ]);
+    });
     it("returns an 0 Amount if both pairs do not exist", async () => {
       const amount = await router.getAmountOut(
         1,

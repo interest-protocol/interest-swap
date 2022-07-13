@@ -547,14 +547,31 @@ contract Router is IRouter {
         uint256 amountStable;
         uint256 amountVolatile;
 
-        if (IFactory(factory).isPair(stablePair))
-            amountStable = IPair(stablePair).getAmountOut(tokenIn, amountIn);
-
-        if (IFactory(factory).isPair(volatilePair))
-            amountVolatile = IPair(volatilePair).getAmountOut(
-                tokenIn,
-                amountIn
+        if (IFactory(factory).isPair(stablePair)) {
+            (bool success, bytes memory data) = stablePair.staticcall(
+                abi.encodeWithSelector(
+                    IPair.getAmountOut.selector,
+                    tokenIn,
+                    amountIn
+                )
             );
+
+            if (success && data.length == 32)
+                amountStable = abi.decode(data, (uint256));
+        }
+
+        if (IFactory(factory).isPair(volatilePair)) {
+            (bool success, bytes memory data) = volatilePair.staticcall(
+                abi.encodeWithSelector(
+                    IPair.getAmountOut.selector,
+                    tokenIn,
+                    amountIn
+                )
+            );
+
+            if (success && data.length == 32)
+                amountVolatile = abi.decode(data, (uint256));
+        }
 
         return
             amountStable > amountVolatile

@@ -1,7 +1,7 @@
 {
   "name": "@interest-protocol/dex",
   "description": "Core contracts for Interest Protocol Swap",
-  "version": "1.0.2",
+  "version": "1.2.0",
   "publishConfig": {
     "access": "public"
   },

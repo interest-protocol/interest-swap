@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.15;
 
-import {Amount, Route} from "../lib/DataTypes.sol";
+import {Amount, Route} from "../DataTypes.sol";
 
 import "./IWNT.sol";
 

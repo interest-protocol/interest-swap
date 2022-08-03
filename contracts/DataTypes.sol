@@ -16,3 +16,9 @@ struct Amount {
     uint256 amount;
     bool stable;
 }
+
+struct InitData {
+    address token0;
+    address token1;
+    bool stable;
+}

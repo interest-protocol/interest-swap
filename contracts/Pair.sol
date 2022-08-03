@@ -1,25 +1,28 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.15;
 
+import "@interest-protocol/library/MathLib.sol";
+import "@interest-protocol/library/SafeTransferLib.sol";
+import "@interest-protocol/library/SafeERC20MetadataLib.sol";
+import "@interest-protocol/library/SafeTransferErrors.sol";
+
 import "./errors/PairErrors.sol";
 
+import "./interfaces/IERC20.sol";
 import "./interfaces/IFactory.sol";
 import "./interfaces/IPair.sol";
 import "./interfaces/IPairCallee.sol";
 
-import "./lib/Math.sol";
-import {Observation} from "./lib/DataTypes.sol";
-import "./lib/Address.sol";
+import {Observation} from "./DataTypes.sol";
 
-//solhint-disable var-name-mixedcase
-//solhint-disable not-rely-on-time
-contract Pair is IPair {
+contract Pair is IPair, SafeTransferErrors {
     /*//////////////////////////////////////////////////////////////
                               Libs
     //////////////////////////////////////////////////////////////*/
 
-    using Address for address;
-    using Math for uint256;
+    using SafeTransferLib for address;
+    using SafeERC20MetadataLib for address;
+    using MathLib for uint256;
 
     /*//////////////////////////////////////////////////////////////
                               ERC20 METADATA
@@ -46,7 +49,6 @@ contract Pair is IPair {
         keccak256(
             "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
         );
-
     bytes32 private immutable _CACHED_DOMAIN_SEPARATOR;
     uint256 private immutable _CACHED_CHAIN_ID;
     bytes32 private immutable _HASHED_NAME;
@@ -60,10 +62,10 @@ contract Pair is IPair {
 
     address public immutable token0; // First token of the pair
     address public immutable token1; // Second token of the pair
-
     address private immutable factory; // Contract that deployed this pair
 
     // Save one unit of token0 and token1 respectively
+
     uint256 internal immutable decimals0;
     uint256 internal immutable decimals1;
 
@@ -83,7 +85,10 @@ contract Pair is IPair {
 
     // If true a pair follows the curve formula
     bool public immutable stable;
-    uint256 private immutable swapFee; // Fee charged during swaps.
+
+    // Fee charged during swaps.
+    uint256 private immutable swapFee;
+
     // Minimum amount of tokens to avoid 0 divisions.
     uint256 private constant MINIMUM_LIQUIDITY = 1000;
 
@@ -221,7 +226,6 @@ contract Pair is IPair {
         bytes32 r,
         bytes32 s
     ) external {
-        //solhint-disable-next-line not-rely-on-time
         if (block.timestamp > deadline) revert Pair__PermitExpired();
         unchecked {
             bytes32 digest = keccak256(
@@ -557,8 +561,8 @@ contract Pair is IPair {
         (uint256 _reserve0, uint256 _reserve1) = (reserve0, reserve1);
 
         // Get current balance in the contract.
-        uint256 _balance0 = token0.currentBalance();
-        uint256 _balance1 = token1.currentBalance();
+        uint256 _balance0 = IERC20(token0).balanceOf(address(this));
+        uint256 _balance1 = IERC20(token1).balanceOf(address(this));
 
         // Difference between current balance and reserves is the new liquidity added in token0 and token1.
         uint256 _amount0 = _balance0 - _reserve0;
@@ -570,12 +574,12 @@ contract Pair is IPair {
 
         // If it is the first time liquidity has been added to the pair. We need to have a minimum liquidity to avoid 0 divisions.
         if (_totalSupply == 0) {
-            liquidity = Math.sqrt(_amount0 * _amount1) - MINIMUM_LIQUIDITY;
+            liquidity = MathLib.sqrt(_amount0 * _amount1) - MINIMUM_LIQUIDITY;
             // Burn the minimum liquidity
             _mint(address(0), MINIMUM_LIQUIDITY);
         } else {
             // If there is current liquidity already, mint tokens based on current reserves and supply
-            liquidity = Math.min(
+            liquidity = MathLib.min(
                 (_amount0 * _totalSupply) / _reserve0,
                 (_amount1 * _totalSupply) / _reserve1
             );
@@ -611,8 +615,8 @@ contract Pair is IPair {
         (address _token0, address _token1) = (token0, token1);
 
         // Get the current balance of token0 and token1 to know how much to send
-        uint256 _balance0 = _token0.currentBalance();
-        uint256 _balance1 = _token1.currentBalance();
+        uint256 _balance0 = IERC20(_token0).balanceOf(address(this));
+        uint256 _balance1 = IERC20(_token1).balanceOf(address(this));
 
         // Find out how many tokens the user wishes to remove
         uint256 tokensToBurn = balanceOf[address(this)];
@@ -633,8 +637,8 @@ contract Pair is IPair {
         _token0.safeTransfer(to, amount0);
         _token1.safeTransfer(to, amount1);
 
-        _balance0 = _token0.currentBalance();
-        _balance1 = _token1.currentBalance();
+        _balance0 = IERC20(_token0).balanceOf(address(this));
+        _balance1 = IERC20(_token1).balanceOf(address(this));
 
         // Update the observations and reserves.
         _sync(_balance0, _balance1, _reserve0, _reserve1);
@@ -687,8 +691,8 @@ contract Pair is IPair {
                 IPairCallee(to).hook(msg.sender, amount0Out, amount1Out, data); // callback, used for flash loans
 
             // Record the balance after sending the tokens out.
-            _balance0 = _token0.currentBalance();
-            _balance1 = _token1.currentBalance();
+            _balance0 = IERC20(_token0).balanceOf(address(this));
+            _balance1 = IERC20(_token1).balanceOf(address(this));
         }
 
         // Find out how many tokens was send to the pair
@@ -708,8 +712,8 @@ contract Pair is IPair {
             (address _token0, address _token1) = (token0, token1);
 
             // Get current balances of the tokens of this pair.
-            _balance0 = _token0.currentBalance(); // since we removed tokens, we need to reconfirm balances, can also simply use previous balance - amountIn/ 10000, but doing balanceOf again as safety check
-            _balance1 = _token1.currentBalance();
+            _balance0 = IERC20(_token0).balanceOf(address(this)); // since we removed tokens, we need to reconfirm balances, can also simply use previous balance - amountIn/ 10000, but doing balanceOf again as safety check
+            _balance1 = IERC20(_token1).balanceOf(address(this));
             // The curve, either x3y+y3x for stable pools, or x*y for volatile pools
 
             // Value in the pool must be greater or equal after the swap.
@@ -736,8 +740,14 @@ contract Pair is IPair {
      * Non-reentrant
      */
     function skim(address to) external lock {
-        token0.safeTransfer(to, token0.currentBalance() - reserve0);
-        token1.safeTransfer(to, token1.currentBalance() - reserve1);
+        token0.safeTransfer(
+            to,
+            IERC20(token0).balanceOf(address(this)) - reserve0
+        );
+        token1.safeTransfer(
+            to,
+            IERC20(token1).balanceOf(address(this)) - reserve1
+        );
     }
 
     /**
@@ -749,8 +759,8 @@ contract Pair is IPair {
      */
     function sync() external lock {
         _sync(
-            token0.currentBalance(),
-            token1.currentBalance(),
+            IERC20(token0).balanceOf(address(this)),
+            IERC20(token1).balanceOf(address(this)),
             reserve0,
             reserve1
         );
@@ -786,8 +796,8 @@ contract Pair is IPair {
         uint256 _kLast = kLast; // gas savings
         if (feeOn) {
             if (_kLast > 0) {
-                uint256 rootK = Math.sqrt(_k(_reserve0, _reserve1));
-                uint256 rootKLast = Math.sqrt(_kLast);
+                uint256 rootK = MathLib.sqrt(_k(_reserve0, _reserve1));
+                uint256 rootKLast = MathLib.sqrt(_kLast);
                 if (rootK > rootKLast) {
                     uint256 numerator = totalSupply * (rootK - rootKLast);
                     uint256 denominator = (rootK * 5) + rootKLast;
@@ -931,7 +941,7 @@ contract Pair is IPair {
         uint256 xy,
         uint256 y
     ) private pure returns (uint256) {
-        for (uint256 i = 0; i < 255; i = _uncheckedInc(i)) {
+        for (uint256 i = 0; i < 255; i = i.uAdd(1)) {
             uint256 yPrev = y;
             uint256 k = _f(x0, y);
             if (k < xy) {
@@ -986,16 +996,6 @@ contract Pair is IPair {
                 ? (_reserve0, _reserve1)
                 : (_reserve1, _reserve0);
             return (amountIn * reserveB) / (reserveA + amountIn);
-        }
-    }
-
-    /**
-     *@notice Helper to optimize gas to increment a number
-     */
-    function _uncheckedInc(uint256 i) private pure returns (uint256 y) {
-        //solhint-disable-next-line no-inline-assembly
-        assembly {
-            y := add(i, 1)
         }
     }
 }

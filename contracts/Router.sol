@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.15;
 
+import "@interest-protocol/library/MathLib.sol";
+
 import "./errors/RouterErrors.sol";
 
 import "./interfaces/IERC20.sol";
@@ -9,15 +11,15 @@ import "./interfaces/IPair.sol";
 import "./interfaces/IRouter.sol";
 import "./interfaces/IWNT.sol";
 
-import {Route, Amount} from "./lib/DataTypes.sol";
-import "./lib/Math.sol";
+import {Route, Amount} from "./DataTypes.sol";
 
 contract Router is IRouter {
     bytes32 private immutable pairCodeHash;
 
     address public immutable factory;
-    //solhint-disable-next-line var-name-mixedcase
+
     IWNT public immutable WNT;
+
     uint256 private constant MINIMUM_LIQUIDITY = 1000;
 
     constructor(address _factory, IWNT wnt) {
@@ -27,7 +29,6 @@ contract Router is IRouter {
     }
 
     modifier ensure(uint256 deadline) {
-        //solhint-disable-next-line not-rely-on-time
         if (block.timestamp > deadline) revert Router__Expired();
         _;
     }
@@ -179,7 +180,7 @@ contract Router is IRouter {
         }
         if (reserveA == 0 && reserveB == 0) {
             (amountA, amountB) = (amountADesired, amountBDesired);
-            liquidity = Math.sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
+            liquidity = MathLib.sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
         } else {
             uint256 amountBOptimal = _quoteLiquidity(
                 amountADesired,
@@ -189,7 +190,7 @@ contract Router is IRouter {
 
             if (amountBOptimal <= amountBDesired) {
                 (amountA, amountB) = (amountADesired, amountBOptimal);
-                liquidity = Math.min(
+                liquidity = MathLib.min(
                     (amountA * _totalSupply) / reserveA,
                     (amountB * _totalSupply) / reserveB
                 );
@@ -200,7 +201,7 @@ contract Router is IRouter {
                     reserveA
                 );
                 (amountA, amountB) = (amountAOptimal, amountBDesired);
-                liquidity = Math.min(
+                liquidity = MathLib.min(
                     (amountA * _totalSupply) / reserveA,
                     (amountB * _totalSupply) / reserveB
                 );

@@ -15,8 +15,6 @@ import "./interfaces/IPairCallee.sol";
 
 import {Observation} from "./DataTypes.sol";
 
-import "hardhat/console.sol";
-
 contract Pair is IPair, SafeTransferErrors {
     /*//////////////////////////////////////////////////////////////
                               Libs

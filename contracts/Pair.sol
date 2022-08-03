@@ -54,7 +54,6 @@ contract Pair is IPair, SafeTransferErrors {
     bytes32 private immutable _HASHED_NAME;
     bytes32 private immutable _HASHED_VERSION;
 
-    /// Slot 5
     mapping(address => uint256) public nonces;
 
     /*//////////////////////////////////////////////////////////////

@@ -5,6 +5,7 @@ import "./interfaces/IFactory.sol";
 
 import "./errors/FactoryErrors.sol";
 
+import "./DataTypes.sol";
 import "./Pair.sol";
 
 /**
@@ -30,9 +31,7 @@ contract Factory is IFactory {
         public getPair;
 
     // Pair contract deployed by the factory will read this data in its constructor by calling {getInitializable}
-    address private _token0;
-    address private _token1;
-    bool private _stable;
+    InitData private _initData;
 
     constructor() {
         // Assign the governor to the creator of this contract.
@@ -65,7 +64,7 @@ contract Factory is IFactory {
             bool
         )
     {
-        return (_token0, _token1, _stable);
+        return (_initData.token0, _initData.token1, _initData.stable);
     }
 
     /**
@@ -102,9 +101,9 @@ contract Factory is IFactory {
             revert Factory__AlreadyDeployed();
 
         // Assign the data for the pair to the state of the factory, so the pair can call {getInitializable}
-        _token0 = token0;
-        _token1 = token1;
-        _stable = stable;
+        _initData.token0 = token0;
+        _initData.token1 = token1;
+        _initData.stable = stable;
 
         // Deploy the right pair
         pair = address(
@@ -112,6 +111,9 @@ contract Factory is IFactory {
                 salt: keccak256(abi.encodePacked(token0, token1, stable))
             }()
         );
+
+        /// Get some gas refund.
+        delete _initData;
 
         // Populate the mapping both ways to access the data easier
         getPair[token0][token1][stable] = pair;

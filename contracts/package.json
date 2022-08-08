@@ -24,6 +24,6 @@
   "license": "MIT",
   "homepage": "https://interestprotocol.com",
   "dependencies": {
-    "@interest-protocol/library": "^1.2.0"
+    "@interest-protocol/library": "^1.2.2"
   }
 }

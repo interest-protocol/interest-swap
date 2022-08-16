@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.15;
+pragma solidity 0.8.16;
 
 contract PairGetAmountError {
     function getAmountOut(address, uint256) external pure returns (uint256) {
